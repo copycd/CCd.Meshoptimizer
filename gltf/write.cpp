@@ -68,6 +68,9 @@ const char* attributeType(cgltf_attribute_type type)
 		return "JOINTS";
 	case cgltf_attribute_type_weights:
 		return "WEIGHTS";
+	// copycd::3DTiles의 batchid를 처리하기 위해서.
+	case cgltf_attribute_type_batchid:
+		return "_BATCHID";
 	default:
 		return "ATTRIBUTE";
 	}
@@ -962,7 +965,8 @@ void writeMeshAttributes(std::string& json, std::vector<BufferView>& views, std:
 		comma(json);
 		append(json, "\"");
 		append(json, attributeType(stream.type));
-		if (stream.type != cgltf_attribute_type_position && stream.type != cgltf_attribute_type_normal && stream.type != cgltf_attribute_type_tangent)
+		// copycd::.수정
+		if (stream.type != cgltf_attribute_type_position && stream.type != cgltf_attribute_type_normal && stream.type != cgltf_attribute_type_tangent && stream.type != cgltf_attribute_type_batchid)
 		{
 			append(json, "_");
 			append(json, size_t(stream.index));

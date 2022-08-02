@@ -601,6 +601,52 @@ StreamFormat writeVertexStream(std::string& bin, const Stream& stream, const Qua
 			return format;
 		}
 	}
+	// copycd:: 3dtiles에 batchid 를 처리하기 위해서
+	else if (stream.type == cgltf_attribute_type_batchid)
+	{
+		int components = 1;
+		// copycd::. 일단은 이건 무조건 원본으로 보관할까?
+		// 나중에 여유가 있을때. quantize도 구현하자.
+		//if (!settings.quantize)
+		if( true)
+		{
+			for (size_t i = 0; i < stream.data.size(); ++i)
+			{
+				const Attr& a = stream.data[i];
+
+				uint16_t v[1] = {uint16_t(a.f[0])};
+				bin.append(reinterpret_cast<const char*>(v), sizeof(v));
+			}
+
+			//StreamFormat format = {cgltf_type_scalar, cgltf_component_type_r_16u, false, sizeof(uint16_t) * components};
+			StreamFormat format = {cgltf_type_scalar, cgltf_component_type_r_16u, qt.normalized, sizeof(uint16_t) * components};
+			return format;
+		}
+
+		// copycd::.TODO.퀀타이즈 적용.
+		return writeVertexStreamRaw(bin, stream, cgltf_type_scalar, 2);
+		/*
+		for (size_t i = 0; i < stream.data.size(); ++i)
+		{
+			const Attr& a = stream.data[i];
+
+			// copycd::.batchID is ushort.
+			{
+				uint16_t v[4] = {
+				    uint16_t(a.f[0]),
+				    uint16_t(a.f[1]),
+				    uint16_t(a.f[2]),
+				    uint16_t(a.f[3])};
+				bin.append(reinterpret_cast<const char*>(v), sizeof(v));
+			}
+		}
+
+		//StreamFormat format = {cgltf_type_vec4, cgltf_component_type_r_8u, true, 4};
+		//return format;
+		StreamFormat format = {cgltf_type_scalar, cgltf_component_type_r_16u, false, 4 };
+		return format;
+		*/
+	}
 	else
 	{
 		return writeVertexStreamRaw(bin, stream, cgltf_type_vec4, 4);

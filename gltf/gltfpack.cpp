@@ -18,7 +18,8 @@
 std::string getVersion()
 {
 	char result[32];
-	snprintf(result, sizeof(result), "%d.%d", MESHOPTIMIZER_VERSION / 1000, (MESHOPTIMIZER_VERSION % 1000) / 10);
+	// copycd::. 수정
+	sprintf_s(result, sizeof(result), "%d.%d", MESHOPTIMIZER_VERSION / 1000, (MESHOPTIMIZER_VERSION % 1000) / 10);
 	return result;
 }
 
@@ -206,12 +207,15 @@ static bool printReport(const char* path, cgltf_data* data, const std::vector<Bu
 		total_draws += std::max(size_t(1), mesh.nodes.size());
 	}
 
-	FILE* out = fopen(path, "wb");
+	FILE* out = NULL;
+	// copycd::.add
+	fopen_s(&out, path, "wb");
 	if (!out)
 		return false;
 
 	fprintf(out, "{\n");
-	fprintf(out, "\t\"generator\": \"gltfpack %s\",\n", getVersion().c_str());
+	// copycd::.add
+	fprintf(out, "\t\"generator\": \"cm.gltfpack %s\",\n", getVersion().c_str());
 	fprintf(out, "\t\"scene\": {\n");
 	fprintf(out, "\t\t\"nodeCount\": %d,\n", int(node_count));
 	fprintf(out, "\t\t\"meshCount\": %d,\n", int(mesh_count));
@@ -783,7 +787,8 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 	}
 
 	append(json, "\"asset\":{");
-	append(json, "\"version\":\"2.0\",\"generator\":\"gltfpack ");
+	// copycd::.add
+	append(json, "\"version\":\"2.0\",\"generator\":\"cm.gltfpack ");
 	append(json, getVersion());
 	append(json, "\"");
 	writeExtras(json, extras, data->asset.extras);
@@ -974,6 +979,40 @@ int gltfpack(const char* input, const char* output, const char* report, Settings
 #ifndef WITH_BASISU
 	if (data->images_count && settings.texture_ktx2)
 	{
+		// copycd:: TODO.
+		// 바로 직전까지 내가 사용하던 코드.
+		// 신규버전에서 어떻게 작동하는지 확인하고, 작동안하면 아래 코드를 활용해야함.
+		if( false )
+		{
+			// copycd::.수정.
+			if (checkKtx(settings.verbose > 1, settings ))
+			{
+				settings.texture_toktx = true;
+			}
+			// copycd::.수정.
+			else if (!checkBasis(settings.verbose > 1, settings ))
+			{
+				fprintf(stderr, "Error: toktx is not present in PATH or TOKTX_PATH is not set\n");
+				fprintf(stderr, "Note: toktx must be installed manually from https://github.com/KhronosGroup/KTX-Software/releases\n");
+				return 3;
+			}
+	
+			if (settings.texture_scale < 1 && !settings.texture_toktx)
+			{
+				fprintf(stderr, "Error: -ts option is only supported by toktx\n");
+				return 3;
+			}
+	
+			if (settings.texture_pow2 && !settings.texture_toktx)
+			{
+				fprintf(stderr, "Error: -tp option is only supported by toktx\n");
+				// copycd::.
+				// // 이제 basisu여도 됨.
+				//return 3;
+			}
+		}
+		
+				
 		fprintf(stderr, "Error: gltfpack was built without BasisU support, texture compression is not available\n");
 #ifdef __wasi__
 		fprintf(stderr, "Note: node.js builds do not support BasisU due to lack of platform features; download a native build from https://github.com/zeux/meshoptimizer/releases\n");
@@ -1149,15 +1188,25 @@ unsigned int textureMask(const char* arg)
 	return result;
 }
 
+// copycd::.추가.
+/// <summary>
+/// 프로그램이 변경되면 바꿔주자.
+/// </summary>
+auto programVersion = "1.2112.11";
 int main(int argc, char** argv)
 {
 #ifndef __wasi__
 	setlocale(LC_ALL, "C"); // disable locale specific convention for number parsing/printing
 #endif
 
+	// copycd::.
+	std::filesystem::path exeFilePath(argv[0]);
+
 	meshopt_encodeIndexVersion(1);
 
 	Settings settings = defaults();
+	// copycd::.
+	settings.baseRootPath = exeFilePath.parent_path();
 
 	const char* input = 0;
 	const char* output = 0;
@@ -1372,6 +1421,12 @@ int main(int argc, char** argv)
 			fprintf(stderr, "Expected option, got %s instead\n", arg);
 			return 1;
 		}
+	}
+
+	// copycd::.추가.
+	if (settings.verbose > 0)
+	{
+		printf("cm.gltfpack %s\n", programVersion);
 	}
 
 	// shortcut for gltfpack -v

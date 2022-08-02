@@ -17,6 +17,8 @@
 
 #include <string>
 #include <vector>
+// copycd::
+#include <filesystem>
 
 struct Attr
 {
@@ -150,6 +152,9 @@ struct Settings
 	bool fallback;
 
 	int verbose;
+
+	// copycd::
+	std::filesystem::path baseRootPath;
 };
 
 struct QuantizationPosition

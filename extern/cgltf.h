@@ -168,6 +168,8 @@ typedef enum cgltf_attribute_type
 	cgltf_attribute_type_color,
 	cgltf_attribute_type_joints,
 	cgltf_attribute_type_weights,
+	// copycd::for 3dtiles.
+	cgltf_attribute_type_batchid,
 	cgltf_attribute_type_custom,
 	cgltf_attribute_type_max_enum
 } cgltf_attribute_type;
@@ -2520,6 +2522,10 @@ static void cgltf_fill_float_array(float* out_array, int size, float value)
 
 static int cgltf_parse_json_float_array(jsmntok_t const* tokens, int i, const uint8_t* json_chunk, float* out_array, int size)
 {
+	// copycd::
+	if (size < 1 )
+		return ++i;
+
 	CGLTF_CHECK_TOKTYPE(tokens[i], JSMN_ARRAY);
 	if (tokens[i].size != size)
 	{
@@ -2622,6 +2628,11 @@ static void cgltf_parse_attribute_type(const char* name, cgltf_attribute_type* o
 	else if (len == 8 && strncmp(name, "TEXCOORD", 8) == 0)
 	{
 		*out_type = cgltf_attribute_type_texcoord;
+	}
+	// copycd::.add
+	else if (strncmp(name, "_BATCHID", 8) == 0)
+	{
+		*out_type = cgltf_attribute_type_batchid;
 	}
 	else if (len == 5 && strncmp(name, "COLOR", 5) == 0)
 	{
