@@ -161,6 +161,7 @@ void encodeImages(std::string* encoded, const cgltf_data* data, const std::vecto
 		if (settings.texture_mode[info.kind] == TextureMode_Raw)
 			continue;
 
+	// copycd:: 수정. 옛날 함수를 호출하는것 같음.
 		gJobPool->add_job([=]() {
 			std::string img_data;
 			std::string mime_type;
@@ -172,7 +173,7 @@ void encodeImages(std::string* encoded, const cgltf_data* data, const std::vecto
 				encoded[i] = error;
 			else
 				encoded[i].swap(result);
-		}, nullptr); // explicitly pass token to make sure we're using thread-safe job_pool implementation
+		}); // explicitly pass token to make sure we're using thread-safe job_pool implementation
 	}
 
 	gJobPool->wait_for_all();
