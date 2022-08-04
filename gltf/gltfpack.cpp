@@ -18,7 +18,7 @@
 std::string getVersion()
 {
 	char result[32];
-	// copycd::. 수정
+	// copycd::.
 	sprintf_s(result, sizeof(result), "%d.%d", MESHOPTIMIZER_VERSION / 1000, (MESHOPTIMIZER_VERSION % 1000) / 10);
 	return result;
 }
@@ -980,16 +980,15 @@ int gltfpack(const char* input, const char* output, const char* report, Settings
 	if (data->images_count && settings.texture_ktx2)
 	{
 		// copycd:: TODO.
-		// 바로 직전까지 내가 사용하던 코드.
-		// 신규버전에서 어떻게 작동하는지 확인하고, 작동안하면 아래 코드를 활용해야함.
+		// this is a code that i was writing.
 		if( false )
 		{
-			// copycd::.수정.
+			// copycd::
 			if (checkKtx(settings.verbose > 1, settings ))
 			{
 				settings.texture_toktx = true;
 			}
-			// copycd::.수정.
+			// copycd::
 			else if (!checkBasis(settings.verbose > 1, settings ))
 			{
 				fprintf(stderr, "Error: toktx is not present in PATH or TOKTX_PATH is not set\n");
@@ -1007,7 +1006,7 @@ int gltfpack(const char* input, const char* output, const char* report, Settings
 			{
 				fprintf(stderr, "Error: -tp option is only supported by toktx\n");
 				// copycd::.
-				// // 이제 basisu여도 됨.
+				// 
 				//return 3;
 			}
 		}
@@ -1188,24 +1187,20 @@ unsigned int textureMask(const char* arg)
 	return result;
 }
 
-// copycd::.추가.
-/// <summary>
-/// 프로그램이 변경되면 바꿔주자.
-/// </summary>
-auto programVersion = "1.2112.11";
+// copycd::. need to chage when programe is changed.
+auto programVersion = "1.2208.04";
+
 int main(int argc, char** argv)
 {
 #ifndef __wasi__
 	setlocale(LC_ALL, "C"); // disable locale specific convention for number parsing/printing
 #endif
 
-	// copycd::.
-	std::filesystem::path exeFilePath(argv[0]);
-
 	meshopt_encodeIndexVersion(1);
 
 	Settings settings = defaults();
-	// copycd::.
+	// copycd:: in order to get base_path.
+	std::filesystem::path exeFilePath(argv[0]);
 	settings.baseRootPath = exeFilePath.parent_path();
 
 	const char* input = 0;
@@ -1423,7 +1418,7 @@ int main(int argc, char** argv)
 		}
 	}
 
-	// copycd::.추가.
+	// copycd::
 	if (settings.verbose > 0)
 	{
 		printf("cm.gltfpack %s\n", programVersion);
