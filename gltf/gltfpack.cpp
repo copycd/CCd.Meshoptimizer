@@ -15,6 +15,9 @@
 
 #include "../src/meshoptimizer.h"
 
+// copycd::. need to chage when programe is changed.
+auto programVersion = "1.2208.06";
+
 std::string getVersion()
 {
 	char result[32];
@@ -1187,8 +1190,6 @@ unsigned int textureMask(const char* arg)
 	return result;
 }
 
-// copycd::. need to chage when programe is changed.
-auto programVersion = "1.2208.04";
 
 int main(int argc, char** argv)
 {
