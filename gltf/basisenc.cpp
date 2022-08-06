@@ -47,6 +47,8 @@ void encodeInit(int jobs)
 	uint32_t num_threads = jobs == 0 ? std::thread::hardware_concurrency() : jobs;
 
 	gJobPool.reset(new job_pool(num_threads));
+
+	interval_timer::init(); // make sure interval_timer globals are initialized from main thread
 }
 
 static bool encodeInternal(const char* input, const char* output, bool yflip, bool normal_map, bool linear, bool uastc, int uastc_l, float uastc_q, int etc1s_l, int etc1s_q, int zstd_l, int width, int height)
@@ -162,6 +164,7 @@ void encodeImages(std::string* encoded, const cgltf_data* data, const std::vecto
 			continue;
 
 		// copycd:: 오류가 있음. thread가 먹통이됨. 그래서 막음.
+		// // -tj 1 옵션을 쓰면 stackoverflow 에러가남.
 		//gJobPool->add_job([=]() {
 			std::string img_data;
 			std::string mime_type;
