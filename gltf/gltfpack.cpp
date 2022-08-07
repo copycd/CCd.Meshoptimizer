@@ -1190,7 +1190,6 @@ unsigned int textureMask(const char* arg)
 	return result;
 }
 
-
 int main(int argc, char** argv)
 {
 #ifndef __wasi__
@@ -1431,11 +1430,6 @@ int main(int argc, char** argv)
 		printf("gltfpack %s\n", getVersion().c_str());
 		return 0;
 	}
-
-#ifdef WITH_BASISU
-	if (settings.texture_ktx2)
-		encodeInit(settings.texture_jobs);
-#endif
 
 	if (test)
 	{
