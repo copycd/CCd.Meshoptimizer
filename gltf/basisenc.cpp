@@ -163,8 +163,8 @@ void encodeImages(std::string* encoded, const cgltf_data* data, const std::vecto
 		if (settings.texture_mode[info.kind] == TextureMode_Raw)
 			continue;
 
-		// copycd:: 오류가 있음. thread가 먹통이됨. 그래서 막음.
-		// // -tj 1 옵션을 쓰면 stackoverflow 에러가남.
+		// copycd:: there is error. thread is deadlock. so take anotation.
+		// // then using -tj 1 option, error occurs stackoverflow.
 		// gJobPool->add_job([=]() {
 		std::string img_data;
 		std::string mime_type;
