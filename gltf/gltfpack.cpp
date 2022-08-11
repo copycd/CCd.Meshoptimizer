@@ -16,12 +16,12 @@
 #include "../src/meshoptimizer.h"
 
 // copycd::. need to chage when programe is changed.
-auto programVersion = "1.2208.06";
+auto programVersion = "1.2208.11";
 
 std::string getVersion()
 {
 	char result[32];
-	// copycd::.
+	// copycd:: because of error
 	sprintf_s(result, sizeof(result), "%d.%d", MESHOPTIMIZER_VERSION / 1000, (MESHOPTIMIZER_VERSION % 1000) / 10);
 	return result;
 }
@@ -211,7 +211,7 @@ static bool printReport(const char* path, cgltf_data* data, const std::vector<Bu
 	}
 
 	FILE* out = NULL;
-	// copycd::.add
+	// copycd::. because of error
 	fopen_s(&out, path, "wb");
 	if (!out)
 		return false;
@@ -790,7 +790,7 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 	}
 
 	append(json, "\"asset\":{");
-	// copycd::.add
+	// copycd::
 	append(json, "\"version\":\"2.0\",\"generator\":\"cm.gltfpack ");
 	append(json, getVersion());
 	append(json, "\"");
@@ -1207,7 +1207,7 @@ int main(int argc, char** argv)
 	const char* output = 0;
 	const char* report = 0;
 	bool help = false;
-	bool test = false;
+	bool testProcess = false;
 
 	std::vector<const char*> testinputs;
 
@@ -1400,14 +1400,14 @@ int main(int argc, char** argv)
 		}
 		else if (strcmp(arg, "-test") == 0)
 		{
-			test = true;
+			testProcess = true;
 		}
 		else if (arg[0] == '-')
 		{
 			fprintf(stderr, "Unrecognized option %s\n", arg);
 			return 1;
 		}
-		else if (test)
+		else if (testProcess)
 		{
 			testinputs.push_back(arg);
 		}
@@ -1431,7 +1431,12 @@ int main(int argc, char** argv)
 		return 0;
 	}
 
-	if (test)
+#ifdef WITH_BASISU
+	if (settings.texture_ktx2)
+		encodeInit(settings.texture_jobs);
+#endif
+
+	if (testProcess)
 	{
 		for (size_t i = 0; i < testinputs.size(); ++i)
 		{

@@ -2606,7 +2606,7 @@ static void cgltf_parse_attribute_type(const char* name, cgltf_attribute_type* o
 {
 	if (*name == '_')
 	{
-		// copycd::.add
+		// copycd:: 3dtiles의 batchid일 경우.
 		if (strncmp(name, "_BATCHID", 8) == 0)
 		{
 			*out_type = cgltf_attribute_type_batchid;

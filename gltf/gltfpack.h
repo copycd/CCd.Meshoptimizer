@@ -316,6 +316,8 @@ void adjustDimensions(int& width, int& height, const Settings& settings);
 const char* mimeExtension(const char* mime_type);
 
 #ifdef WITH_BASISU
+void encodeInit(int jobs);
+bool encodeBasis(const std::string& data, const char* mime_type, std::string& result, const ImageInfo& info, const Settings& settings);
 void encodeImages(std::string* encoded, const cgltf_data* data, const std::vector<ImageInfo>& images, const char* input_path, const Settings& settings);
 #endif
 
