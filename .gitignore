@@ -2,3 +2,5 @@
 /data/
 /gltf/library.wasm
 /bin
+/.idea/
+/cmake-build-*/

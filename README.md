@@ -16,7 +16,7 @@ meshoptimizer is hosted on GitHub; you can download the latest release using git
 git clone -b v0.18 https://github.com/zeux/meshoptimizer.git
 ```
 
-Alternatively you can [download the .zip archive from GitHub](https://github.com/zeux/meshoptimizer/archive/v0.15.zip).
+Alternatively you can [download the .zip archive from GitHub](https://github.com/zeux/meshoptimizer/archive/v0.18.zip).
 
 The library is also available as a package ([ArchLinux](https://aur.archlinux.org/packages/meshoptimizer/), [Debian](https://packages.debian.org/libmeshoptimizer), [Ubuntu](https://packages.ubuntu.com/libmeshoptimizer), [Vcpkg](https://github.com/microsoft/vcpkg/tree/master/ports/meshoptimizer)).
 
@@ -24,13 +24,7 @@ The library is also available as a package ([ArchLinux](https://aur.archlinux.or
 
 `gltfpack` is a CLI tool for optimizing meshes using meshoptimizer.
 
-You can download a pre-built binary for gltfpack on [Releases page](https://github.com/zeux/meshoptimizer/releases), or install [npm package](https://www.npmjs.com/package/gltfpack) as follows:
-
-```
-npm install -g gltfpack
-```
-
-You can also find prebuilt binaries of `gltfpack` built from master on [Actions page](https://github.com/zeux/meshoptimizer/actions).
+You can download a pre-built binary for gltfpack on [Releases page](https://github.com/zeux/meshoptimizer/releases), or install [npm package](https://www.npmjs.com/package/gltfpack). Native binaries are recommended over npm since they can work with larger files, run faster, and support texture compression.
 
 [Learn more about gltfpack](./gltf/README.md)
 
@@ -42,6 +36,10 @@ meshoptimizer is distributed as a set of C++ source files. To include it into yo
 * Add source files to your project's build system
 
 The source files are organized in such a way that you don't need to change your build-system settings, and you only need to add the files for the algorithms you use.
+
+## Installing from vcpkg
+
+The meshoptimizer port in [vcpkg](https://github.com/Microsoft/vcpkg) is kept up to date by Microsoft team members and community contributors. You can download and install meshoptimizer using the vcpkg dependency manager, [Getting Started](https://github.com/microsoft/vcpkg#getting-started).
 
 ## Pipeline
 
