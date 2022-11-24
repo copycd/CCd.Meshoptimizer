@@ -16,7 +16,7 @@
 #include "../src/meshoptimizer.h"
 
 // copycd::. need to chage when programe is changed.
-auto programVersion = "1.2211.16";
+auto programVersion = "1.2211.24";
 
 std::string getVersion()
 {
@@ -218,7 +218,7 @@ static bool printReport(const char* path, cgltf_data* data, const std::vector<Bu
 
 	fprintf(out, "{\n");
 	// copycd::.add
-	fprintf(out, "\t\"generator\": \"cm.gltfpack %s\",\n", getVersion().c_str());
+	fprintf(out, "\t\"generator\": \"cc.gltfpack %s\",\n", getVersion().c_str());
 	fprintf(out, "\t\"scene\": {\n");
 	fprintf(out, "\t\t\"nodeCount\": %d,\n", int(node_count));
 	fprintf(out, "\t\t\"meshCount\": %d,\n", int(mesh_count));
@@ -801,7 +801,7 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 
 	append(json, "\"asset\":{");
 	// copycd::
-	append(json, "\"version\":\"2.0\",\"generator\":\"cm.gltfpack ");
+	append(json, "\"version\":\"2.0\",\"generator\":\"cc.gltfpack ");
 	append(json, getVersion());
 	append(json, "\"");
 	writeExtras(json, data->asset.extras);
@@ -1433,6 +1433,9 @@ int main(int argc, char** argv)
 			return 1;
 		}
 	}
+
+	// copycd:: there is bug. so that job is 1 thread.
+	settings.texture_jobs = 1;
 
 	// copycd::
 	if (settings.verbose > 0)
