@@ -2668,8 +2668,31 @@ static int cgltf_parse_json_string_array(cgltf_options* options, jsmntok_t const
 
 static void cgltf_parse_attribute_type(const char* name, cgltf_attribute_type* out_type, int* out_index)
 {
+	// copycd:: 아래 있던걸, 먼저 수행하도록 위로 올림.
 	const char* us = strchr(name, '_');
 	size_t len = us ? (size_t)(us - name) : strlen(name);
+
+	if (*name == '_')
+	{
+		// copycd:: 3dtiles batchid
+		if (len == 0 && strncmp(name, "_BATCHID", 8) == 0)
+		{
+			*out_type = cgltf_attribute_type_batchid;
+			// copycd:: no need out_index;
+			return;
+		}
+		// copycd:: 3dtiles batchid for Next glb format.
+		else if (len == 0 && strncmp(name, "_FEATURE_ID", 11) == 0)
+		{
+			*out_type = cgltf_attribute_type_featureid;
+			// 계속 아래로 진행.
+		}
+		else
+		{
+			*out_type = cgltf_attribute_type_custom;
+			return;
+		}
+	}
 
 	if (len == 8 && strncmp(name, "POSITION", 8) == 0)
 	{
@@ -2698,18 +2721,6 @@ static void cgltf_parse_attribute_type(const char* name, cgltf_attribute_type* o
 	else if (len == 7 && strncmp(name, "WEIGHTS", 7) == 0)
 	{
 		*out_type = cgltf_attribute_type_weights;
-	}
-	// copycd:: 3dtiles batchid
-	else if (len == 0 && strncmp(name, "_BATCHID", 8) == 0)
-	{
-		*out_type = cgltf_attribute_type_batchid;
-		// copycd:: no need out_index;
-		return;
-	}
-	// copycd:: 3dtiles batchid
-	else if (len == 0 && strncmp(name, "_FEATURE_ID_", 12) == 0)
-	{
-		*out_type = cgltf_attribute_type_featureid;
 	}
 	else
 	{

@@ -16,7 +16,7 @@
 #include "../src/meshoptimizer.h"
 
 // copycd::. need to chage when programe is changed.
-auto programVersion = "1.2211.24";
+auto programVersion = "1.2212";
 
 std::string getVersion()
 {
@@ -218,7 +218,7 @@ static bool printReport(const char* path, cgltf_data* data, const std::vector<Bu
 
 	fprintf(out, "{\n");
 	// copycd::.add
-	fprintf(out, "\t\"generator\": \"cc.gltfpack %s\",\n", getVersion().c_str());
+	fprintf(out, "\t\"generator\": \"ccd.gltfpack %s\",\n", getVersion().c_str());
 	fprintf(out, "\t\"scene\": {\n");
 	fprintf(out, "\t\t\"nodeCount\": %d,\n", int(node_count));
 	fprintf(out, "\t\t\"meshCount\": %d,\n", int(mesh_count));
@@ -261,8 +261,8 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 {
 	if (settings.verbose)
 	{
-		printf("input: %d nodes, %d meshes (%d primitives), %d materials, %d skins, %d animations\n",
-		    int(data->nodes_count), int(data->meshes_count), int(meshes.size()), int(data->materials_count), int(data->skins_count), int(animations.size()));
+		printf("input: %d nodes, %d meshes (%d primitives), %d materials, %d skins, %d animations, %d images\n",
+		    int(data->nodes_count), int(data->meshes_count), int(meshes.size()), int(data->materials_count), int(data->skins_count), int(animations.size()), int(data->images_count));
 		printMeshStats(meshes, "input");
 	}
 
@@ -801,7 +801,7 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 
 	append(json, "\"asset\":{");
 	// copycd::
-	append(json, "\"version\":\"2.0\",\"generator\":\"cc.gltfpack ");
+	append(json, "\"version\":\"2.0\",\"generator\":\"ccd.gltfpack ");
 	append(json, getVersion());
 	append(json, "\"");
 	writeExtras(json, data->asset.extras);
@@ -1440,7 +1440,7 @@ int main(int argc, char** argv)
 	// copycd::
 	if (settings.verbose > 0)
 	{
-		printf("cm.gltfpack %s\n", programVersion);
+		printf("ccd.gltfpack %s\n", programVersion);
 	}
 
 	// shortcut for gltfpack -v
