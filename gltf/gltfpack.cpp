@@ -16,7 +16,7 @@
 #include "../src/meshoptimizer.h"
 
 // copycd::. need to chage when programe is changed.
-auto programVersion = "3.2304";
+auto programVersion = "3.2304.30";
 
 std::string getVersion()
 {
@@ -1470,6 +1470,7 @@ int main(int argc, char** argv)
 	if (!input || !output || help)
 	{
 		fprintf(stderr, "ccd.gltfpack %s\n", getVersion().c_str());
+		fprintf(stderr, " %s\n", programVersion );
 		fprintf(stderr, "Usage: ccd.gltfpack [options] -i input -o output\n");
 
 		if (help)
