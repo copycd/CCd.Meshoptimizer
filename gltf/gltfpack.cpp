@@ -16,7 +16,7 @@
 #include "../src/meshoptimizer.h"
 
 // copycd::. need to chage when programe is changed.
-auto programVersion = "3.2304.30";
+auto programVersion = "3.2306.09";
 
 std::string getVersion()
 {
@@ -441,6 +441,7 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 	bool ext_volume = false;
 	bool ext_emissive_strength = false;
 	bool ext_iridescence = false;
+	bool ext_anisotropy = false;
 	bool ext_unlit = false;
 	bool ext_instancing = false;
 	bool ext_texture_transform = false;
@@ -531,6 +532,7 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 		ext_volume = ext_volume || material.has_volume;
 		ext_emissive_strength = ext_emissive_strength || material.has_emissive_strength;
 		ext_iridescence = ext_iridescence || material.has_iridescence;
+		ext_anisotropy = ext_anisotropy || material.has_anisotropy;
 		ext_unlit = ext_unlit || material.unlit;
 		ext_texture_transform = ext_texture_transform || mi.usesTextureTransform;
 	}
@@ -820,6 +822,7 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 	    {"KHR_materials_volume", ext_volume, false},
 	    {"KHR_materials_emissive_strength", ext_emissive_strength, false},
 	    {"KHR_materials_iridescence", ext_iridescence, false},
+	    {"KHR_materials_anisotropy", ext_anisotropy, false},
 	    {"KHR_materials_unlit", ext_unlit, false},
 	    {"KHR_materials_variants", data->variants_count > 0, false},
 	    {"KHR_lights_punctual", data->lights_count > 0, false},
@@ -991,39 +994,6 @@ int gltfpack(const char* input, const char* output, const char* report, Settings
 #ifndef WITH_BASISU
 	if (data->images_count && settings.texture_ktx2)
 	{
-		// copycd:: TODO.
-		// this is a code that i was writing.
-		if( false )
-		{
-			// copycd::
-			if (checkKtx(settings.verbose > 1, settings ))
-			{
-				settings.texture_toktx = true;
-			}
-			// copycd::
-			else if (!checkBasis(settings.verbose > 1, settings ))
-			{
-				fprintf(stderr, "Error: toktx is not present in PATH or TOKTX_PATH is not set\n");
-				fprintf(stderr, "Note: toktx must be installed manually from https://github.com/KhronosGroup/KTX-Software/releases\n");
-				return 3;
-			}
-	
-			if (settings.texture_scale < 1 && !settings.texture_toktx)
-			{
-				fprintf(stderr, "Error: -ts option is only supported by toktx\n");
-				return 3;
-			}
-	
-			if (settings.texture_pow2 && !settings.texture_toktx)
-			{
-				fprintf(stderr, "Error: -tp option is only supported by toktx\n");
-				// copycd::.
-				// 
-				//return 3;
-			}
-		}
-		
-				
 		fprintf(stderr, "Error: gltfpack was built without BasisU support, texture compression is not available\n");
 #ifdef __wasi__
 		fprintf(stderr, "Note: node.js builds do not support BasisU due to lack of platform features; download a native build from https://github.com/zeux/meshoptimizer/releases\n");
@@ -1450,6 +1420,7 @@ int main(int argc, char** argv)
 	// shortcut for gltfpack -v
 	if (settings.verbose && argc == 2)
 	{
+		// copycd::
 		printf("ccd.gltfpack %s\n", getVersion().c_str());
 		return 0;
 	}
@@ -1469,9 +1440,9 @@ int main(int argc, char** argv)
 
 	if (!input || !output || help)
 	{
+		// copycd::
 		fprintf(stderr, "ccd.gltfpack %s\n", getVersion().c_str());
-		fprintf(stderr, " %s\n", programVersion );
-		fprintf(stderr, "Usage: ccd.gltfpack [options] -i input -o output\n");
+		fprintf(stderr, "Usage: gltfpack [options] -i input -o output\n");
 
 		if (help)
 		{
@@ -1533,6 +1504,7 @@ int main(int argc, char** argv)
 			fprintf(stderr, "\t-c: produce compressed gltf/glb files (-cc for higher compression ratio)\n");
 			fprintf(stderr, "\t-tc: convert all textures to KTX2 with BasisU supercompression\n");
 			fprintf(stderr, "\t-si R: simplify meshes targeting triangle count ratio R (default: 1; R should be between 0 and 1)\n");
+			// copycd::
 			fprintf(stderr, "\nRun ccd.gltfpack -h to display a full list of options\n");
 		}
 
