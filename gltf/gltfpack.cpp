@@ -22,7 +22,7 @@ std::string getVersion()
 {
 	char result[32];
 	// copycd:: because of error
-	sprintf_s(result, sizeof(result), "%d.%d", MESHOPTIMIZER_VERSION / 1000, (MESHOPTIMIZER_VERSION % 1000) / 10);
+	sprintf_s(result, sizeof(result), "%d.%d.2310", MESHOPTIMIZER_VERSION / 1000, (MESHOPTIMIZER_VERSION % 1000) / 10);
 	return result;
 }
 
