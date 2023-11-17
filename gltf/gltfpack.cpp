@@ -16,7 +16,7 @@
 #include "../src/meshoptimizer.h"
 
 // copycd::. need to chage when programe is changed.
-auto programVersion = "3.2311.03";
+auto programVersion = "3.2311.17";
 
 std::string getVersion()
 {
