@@ -119,6 +119,7 @@ struct Settings
 	bool pos_normalized;
 	bool pos_float;
 	bool tex_float;
+	bool nrm_float;
 
 	int trn_bits;
 	int rot_bits;
@@ -225,6 +226,8 @@ struct MaterialInfo
 
 	bool usesTextureTransform;
 	bool needsTangents;
+	bool unlit;
+
 	unsigned int textureSetMask;
 
 	int remap;
