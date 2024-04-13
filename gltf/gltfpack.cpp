@@ -16,7 +16,7 @@
 #include "../src/meshoptimizer.h"
 
 // copycd::. need to chage when programe is changed.
-auto programVersion = "3.2404.05";
+auto programVersion = "3.2404.14";
 
 std::string getVersion()
 {
@@ -487,9 +487,9 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 		if (encoded_images.size() && !encoded_images[i].empty())
 		{
 			if (encoded_images[i].compare(0, 5, "error") == 0)
-				fprintf(stderr, "Warning: unable to encode image %d (%s), skipping (%s)\n", int(i), image.uri ? image.uri : "?", encoded_images[i].c_str());
+				writeImageError(json_images, "encode", int(i), image.uri, encoded_images[i].c_str());
 			else
-				writeEncodedImage(json_images, views, image, encoded_images[i], images[i], output_path, settings);
+				writeEncodedImage(json_images, views, image, encoded_images[i], images[i], i, output_path, settings);
 
 			encoded_images[i] = std::string(); // reclaim memory early
 		}
@@ -1523,7 +1523,7 @@ int main(int argc, char** argv)
 			fprintf(stderr, "\nVertex precision:\n");
 			fprintf(stderr, "\t-vp N: use N-bit quantization for positions (default: 14; N should be between 1 and 16)\n");
 			fprintf(stderr, "\t-vt N: use N-bit quantization for texture coordinates (default: 12; N should be between 1 and 16)\n");
-			fprintf(stderr, "\t-vn N: use N-bit quantization for normals and tangents (default: 8; N should be between 1 and 16)\n");
+			fprintf(stderr, "\t-vn N: use N-bit quantization for normals (default: 8; N should be between 1 and 16) and tangents (up to 8-bit)\n");
 			fprintf(stderr, "\t-vc N: use N-bit quantization for colors (default: 8; N should be between 1 and 16)\n");
 			fprintf(stderr, "\nVertex positions:\n");
 			fprintf(stderr, "\t-vpi: use integer attributes for positions (default)\n");
