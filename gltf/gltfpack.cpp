@@ -1460,7 +1460,8 @@ int main(int argc, char** argv)
 	}
 
 	// copycd:: there is bug. so that job is 1 thread.
-	settings.texture_jobs = 1;
+	// 현재는 버그가 없는것 같아서, 다시 막음.
+	//settings.texture_jobs = 1;
 
 	// copycd::
 	if (settings.verbose > 0)

@@ -2831,7 +2831,7 @@ static void cgltf_parse_attribute_type(const char* name, cgltf_attribute_type* o
 		// copycd:: 3dtiles batchid for Next glb format.
 		else if (len == 0 && strncmp(name, "_FEATURE_ID", 11) == 0)
 		{
-			copycd::
+			// copycd::
 			*out_type = cgltf_attribute_type_featureid;
 			// 계속 아래로 진행.
 		}
