@@ -1,5 +1,5 @@
 /**
- * gltfpack - version 0.20
+ * gltfpack - version 0.21
  *
  * Copyright (C) 2016-2024, by Arseny Kapoulkine (arseny.kapoulkine@gmail.com)
  * Report bugs and download new versions at https://github.com/zeux/meshoptimizer
@@ -138,6 +138,7 @@ struct Settings
 	float simplify_threshold;
 	bool simplify_aggressive;
 	bool simplify_lock_borders;
+	bool simplify_attributes;
 	float simplify_debug;
 
 	int meshlet_debug;
@@ -175,6 +176,8 @@ struct QuantizationPosition
 	float scale;
 	int bits;
 	bool normalized;
+
+	float node_scale; // computed from scale/bits/normalized
 };
 
 struct QuantizationTexture
@@ -209,7 +212,7 @@ struct NodeInfo
 	bool keep;
 	bool animated;
 
-	unsigned int animated_paths;
+	unsigned int animated_path_mask;
 
 	int remap;
 
@@ -224,11 +227,11 @@ struct MaterialInfo
 {
 	bool keep;
 
-	bool usesTextureTransform;
-	bool needsTangents;
+	bool uses_texture_transform;
+	bool needs_tangents;
 	bool unlit;
 
-	unsigned int textureSetMask;
+	unsigned int texture_set_mask;
 
 	int remap;
 };
@@ -308,8 +311,8 @@ cgltf_data* parseGlb(const void* buffer, size_t size, std::vector<Mesh>& meshes,
 void processAnimation(Animation& animation, const Settings& settings);
 void processMesh(Mesh& mesh, const Settings& settings);
 
-void debugSimplify(const Mesh& mesh, Mesh& kinds, Mesh& loops, float ratio);
-void debugMeshlets(const Mesh& mesh, Mesh& meshlets, Mesh& bounds, int max_vertices, bool scan);
+void debugSimplify(const Mesh& mesh, Mesh& kinds, Mesh& loops, float ratio, bool attributes);
+void debugMeshlets(const Mesh& mesh, Mesh& meshlets, int max_vertices, bool scan);
 
 bool compareMeshTargets(const Mesh& lhs, const Mesh& rhs);
 bool compareMeshVariants(const Mesh& lhs, const Mesh& rhs);
@@ -374,9 +377,7 @@ const char* animationPath(cgltf_animation_path_type type);
 void writeMaterial(std::string& json, const cgltf_data* data, const cgltf_material& material, const QuantizationPosition* qp, const QuantizationTexture* qt, std::vector<TextureInfo>& textures);
 void writeBufferView(std::string& json, BufferView::Kind kind, StreamFormat::Filter filter, size_t count, size_t stride, size_t bin_offset, size_t bin_size, BufferView::Compression compression, size_t compressed_offset, size_t compressed_size);
 void writeSampler(std::string& json, const cgltf_sampler& sampler);
-void writeImage(std::string& json, std::vector<BufferView>& views, const cgltf_image& image, const ImageInfo& info, size_t index, const char* input_path, const char* output_path, const Settings& settings);
-void writeImageError(std::string& json, const char* action, size_t index, const char* uri, const char* reason = NULL);
-void writeEncodedImage(std::string& json, std::vector<BufferView>& views, const cgltf_image& image, const std::string& encoded, const ImageInfo& info, size_t index, const char* output_path, const Settings& settings);
+void writeImage(std::string& json, std::vector<BufferView>& views, const cgltf_image& image, const ImageInfo& info, const std::string* encoded, size_t index, const char* input_path, const char* output_path, const Settings& settings);
 void writeTexture(std::string& json, const cgltf_texture& texture, const ImageInfo* info, cgltf_data* data, const Settings& settings);
 void writeMeshAttributes(std::string& json, std::vector<BufferView>& views, std::string& json_accessors, size_t& accr_offset, const Mesh& mesh, int target, const QuantizationPosition& qp, const QuantizationTexture& qt, const Settings& settings);
 size_t writeMeshIndices(std::vector<BufferView>& views, std::string& json_accessors, size_t& accr_offset, const Mesh& mesh, const Settings& settings);

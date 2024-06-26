@@ -16,13 +16,13 @@
 #include "../src/meshoptimizer.h"
 
 // copycd::. need to chage when programe is changed.
-auto programVersion = "3.2404.14";
+auto programVersion = "3.2406.26";
 
 std::string getVersion()
 {
 	char result[32];
 	// copycd:: because of error
-	sprintf_s(result, sizeof(result), "%d.%d.2404", MESHOPTIMIZER_VERSION / 1000, (MESHOPTIMIZER_VERSION % 1000) / 10);
+	sprintf_s(result, sizeof(result), "%d.%d.2406", MESHOPTIMIZER_VERSION / 1000, (MESHOPTIMIZER_VERSION % 1000) / 10);
 	return result;
 }
 
@@ -257,6 +257,15 @@ static bool canTransformMesh(const Mesh& mesh)
 	return true;
 }
 
+static bool isExtensionSupported(const ExtensionInfo* extensions, size_t count, const char* name)
+{
+	for (size_t i = 0; i < count; ++i)
+		if (strcmp(extensions[i].name, name) == 0)
+			return true;
+
+	return false;
+}
+
 static void process(cgltf_data* data, const char* input_path, const char* output_path, const char* report_path, std::vector<Mesh>& meshes, std::vector<Animation>& animations, const Settings& settings, std::string& json, std::string& bin, std::string& fallback, size_t& fallback_size)
 {
 	if (settings.verbose)
@@ -279,7 +288,10 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 	for (size_t i = 0; i < meshes.size(); ++i)
 	{
 		Mesh& mesh = meshes[i];
-		assert(mesh.instances.empty());
+
+		// mesh is already instanced, skip
+		if (!mesh.instances.empty())
+			continue;
 
 		// mesh is already world space, skip
 		if (mesh.nodes.empty())
@@ -359,8 +371,8 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 		{
 			MaterialInfo vi = materials[mesh.variants[j].material - data->materials];
 
-			mi.needsTangents |= vi.needsTangents;
-			mi.textureSetMask |= vi.textureSetMask;
+			mi.needs_tangents |= vi.needs_tangents;
+			mi.texture_set_mask |= vi.texture_set_mask;
 			mi.unlit &= vi.unlit;
 		}
 
@@ -385,7 +397,7 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 		{
 			Mesh kinds = {};
 			Mesh loops = {};
-			debugSimplify(mesh, kinds, loops, settings.simplify_debug);
+			debugSimplify(mesh, kinds, loops, settings.simplify_debug, settings.simplify_attributes);
 			debug_meshes.push_back(kinds);
 			debug_meshes.push_back(loops);
 		}
@@ -393,10 +405,8 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 		if (settings.meshlet_debug > 0)
 		{
 			Mesh meshlets = {};
-			Mesh bounds = {};
-			debugMeshlets(mesh, meshlets, bounds, settings.meshlet_debug, /* scan= */ false);
+			debugMeshlets(mesh, meshlets, settings.meshlet_debug, /* scan= */ false);
 			debug_meshes.push_back(meshlets);
-			debug_meshes.push_back(bounds);
 		}
 	}
 #endif
@@ -450,6 +460,8 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 	bool ext_unlit = false;
 	bool ext_instancing = false;
 	bool ext_texture_transform = false;
+	bool ext_texture_basisu = false;
+	bool ext_texture_webp = false;
 
 	size_t accr_offset = 0;
 	size_t node_offset = 0;
@@ -482,22 +494,15 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 	{
 		const cgltf_image& image = data->images[i];
 
+		std::string* encoded = (encoded_images.size() && !encoded_images[i].empty()) ? &encoded_images[i] : NULL;
+
 		comma(json_images);
 		append(json_images, "{");
-		if (encoded_images.size() && !encoded_images[i].empty())
-		{
-			if (encoded_images[i].compare(0, 5, "error") == 0)
-				writeImageError(json_images, "encode", int(i), image.uri, encoded_images[i].c_str());
-			else
-				writeEncodedImage(json_images, views, image, encoded_images[i], images[i], i, output_path, settings);
-
-			encoded_images[i] = std::string(); // reclaim memory early
-		}
-		else
-		{
-			writeImage(json_images, views, image, images[i], i, input_path, output_path, settings);
-		}
+		writeImage(json_images, views, image, images[i], encoded, i, input_path, output_path, settings);
 		append(json_images, "}");
+
+		if (encoded)
+			*encoded = std::string(); // reclaim memory early
 	}
 
 	for (size_t i = 0; i < data->textures_count; ++i)
@@ -514,6 +519,8 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 
 		assert(textures[i].remap == int(texture_offset));
 		texture_offset++;
+		ext_texture_basisu = ext_texture_basisu || texture.has_basisu;
+		ext_texture_webp = ext_texture_webp || texture.has_webp;
 	}
 
 	for (size_t i = 0; i < data->materials_count; ++i)
@@ -547,7 +554,7 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 		ext_anisotropy = ext_anisotropy || material.has_anisotropy;
 		ext_dispersion = ext_dispersion || material.has_dispersion;
 		ext_unlit = ext_unlit || material.unlit;
-		ext_texture_transform = ext_texture_transform || mi.usesTextureTransform;
+		ext_texture_transform = ext_texture_transform || mi.uses_texture_transform;
 	}
 
 	for (size_t i = 0; i < meshes.size(); ++i)
@@ -583,7 +590,7 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 			if (prim.type != cgltf_primitive_type_triangles)
 			{
 				append(json_meshes, ",\"mode\":");
-				append(json_meshes, size_t(prim.type));
+				append(json_meshes, size_t(prim.type - cgltf_primitive_type_points));
 			}
 			if (mesh.targets)
 			{
@@ -667,9 +674,6 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 
 		append(json_meshes, "}");
 
-		assert(mesh.nodes.empty() || mesh.instances.empty());
-		ext_instancing = ext_instancing || !mesh.instances.empty();
-
 		if (mesh.nodes.size())
 		{
 			for (size_t j = 0; j < mesh.nodes.size(); ++j)
@@ -678,7 +682,7 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 				assert(ni.keep);
 
 				// if we don't use position quantization, prefer attaching the mesh to its node directly
-				if (!ni.has_mesh && (!settings.quantize || settings.pos_float))
+				if (!ni.has_mesh && (!settings.quantize || settings.pos_float || (qp.offset[0] == 0.f && qp.offset[1] == 0.f && qp.offset[2] == 0 && qp.node_scale == 1.f)))
 				{
 					ni.has_mesh = true;
 					ni.mesh_index = mesh_offset;
@@ -694,7 +698,8 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 				}
 			}
 		}
-		else if (mesh.instances.size())
+
+		if (mesh.instances.size())
 		{
 			assert(mesh.scene >= 0);
 			comma(json_roots[mesh.scene]);
@@ -707,7 +712,8 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 
 			node_offset++;
 		}
-		else
+
+		if (mesh.nodes.empty() && mesh.instances.empty())
 		{
 			assert(mesh.scene >= 0);
 			comma(json_roots[mesh.scene]);
@@ -719,6 +725,7 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 		}
 
 		mesh_offset++;
+		ext_instancing = ext_instancing || !mesh.instances.empty();
 
 		// skip all meshes that we've written in this iteration
 		assert(pi > i);
@@ -840,9 +847,18 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 	    {"KHR_materials_unlit", ext_unlit, false},
 	    {"KHR_materials_variants", data->variants_count > 0, false},
 	    {"KHR_lights_punctual", data->lights_count > 0, false},
-	    {"KHR_texture_basisu", !json_textures.empty() && settings.texture_ktx2, true},
+	    {"KHR_texture_basisu", (!json_textures.empty() && settings.texture_ktx2) || ext_texture_basisu, true},
+	    {"EXT_texture_webp", ext_texture_webp, true},
 	    {"EXT_mesh_gpu_instancing", ext_instancing, true},
 	};
+
+	for (size_t i = 0; i < data->extensions_required_count; ++i)
+	{
+		const char* ext = data->extensions_required[i];
+
+		if (!isExtensionSupported(extensions, sizeof(extensions) / sizeof(extensions[0]), ext))
+			fprintf(stderr, "Warning: required extension %s is not supported and will be skipped\n", ext);
+	}
 
 	writeExtensions(json, extensions, sizeof(extensions) / sizeof(extensions[0]));
 
@@ -1179,7 +1195,7 @@ Settings defaults()
 template <typename T>
 T clamp(T v, T min, T max)
 {
-	return v < min ? min : v > max ? max : v;
+	return v < min ? min : (v > max ? max : v);
 }
 
 unsigned int textureMask(const char* arg)
@@ -1322,6 +1338,10 @@ int main(int argc, char** argv)
 		else if (strcmp(arg, "-slb") == 0)
 		{
 			settings.simplify_lock_borders = true;
+		}
+		else if (strcmp(arg, "-sv") == 0)
+		{
+			settings.simplify_attributes = true;
 		}
 #ifndef NDEBUG
 		else if (strcmp(arg, "-sd") == 0 && i + 1 < argc && isdigit(argv[i + 1][0]))
@@ -1521,6 +1541,7 @@ int main(int argc, char** argv)
 			fprintf(stderr, "\nSimplification:\n");
 			fprintf(stderr, "\t-si R: simplify meshes targeting triangle/point count ratio R (default: 1; R should be between 0 and 1)\n");
 			fprintf(stderr, "\t-sa: aggressively simplify to the target ratio disregarding quality\n");
+			fprintf(stderr, "\t-sv: take vertex attributes into account when simplifying meshes\n");
 			fprintf(stderr, "\t-slb: lock border vertices during simplification to avoid gaps on connected meshes\n");
 			fprintf(stderr, "\nVertex precision:\n");
 			fprintf(stderr, "\t-vp N: use N-bit quantization for positions (default: 14; N should be between 1 and 16)\n");
