@@ -16,13 +16,13 @@
 #include "../src/meshoptimizer.h"
 
 // copycd::. need to chage when programe is changed.
-auto programVersion = "3.2406.26";
+auto programVersion = "5.2407.26";
 
 std::string getVersion()
 {
 	char result[32];
 	// copycd:: because of error
-	sprintf_s(result, sizeof(result), "%d.%d.2406", MESHOPTIMIZER_VERSION / 1000, (MESHOPTIMIZER_VERSION % 1000) / 10);
+	sprintf_s(result, sizeof(result), "%d.%d.2407", MESHOPTIMIZER_VERSION / 1000, (MESHOPTIMIZER_VERSION % 1000) / 10);
 	return result;
 }
 
@@ -257,6 +257,68 @@ static bool canTransformMesh(const Mesh& mesh)
 	return true;
 }
 
+static void detachMesh(Mesh& mesh, cgltf_data* data, const std::vector<NodeInfo>& nodes, const Settings& settings)
+{
+	// mesh is already instanced, skip
+	if (!mesh.instances.empty())
+		return;
+
+	// mesh is already world space, skip
+	if (mesh.nodes.empty())
+		return;
+
+	// note: when -kn is specified, we keep mesh-node attachment so that named nodes can be transformed
+	if (settings.keep_nodes)
+		return;
+
+	// we keep skinned meshes or meshes with morph targets as is
+	// in theory we could transform both, but in practice transforming morph target meshes is more involved,
+	// and reparenting skinned meshes leads to incorrect bounding box generated in three.js
+	if (mesh.skin || mesh.targets)
+		return;
+
+	bool any_animated = false;
+	for (size_t j = 0; j < mesh.nodes.size(); ++j)
+		any_animated |= nodes[mesh.nodes[j] - data->nodes].animated;
+
+	// animated meshes will be anchored to the same node that they used to be in to retain the animation
+	if (any_animated)
+		return;
+
+	int scene = nodes[mesh.nodes[0] - data->nodes].scene;
+	bool any_other_scene = false;
+	for (size_t j = 0; j < mesh.nodes.size(); ++j)
+		any_other_scene |= scene != nodes[mesh.nodes[j] - data->nodes].scene;
+
+	// we only merge instances when all nodes have a single consistent scene
+	if (scene < 0 || any_other_scene)
+		return;
+
+	// we only merge multiple instances together if requested
+	// this often makes the scenes faster to render by reducing the draw call count, but can result in larger files
+	if (mesh.nodes.size() > 1 && !settings.mesh_merge && !settings.mesh_instancing)
+		return;
+
+	// prefer instancing if possible, use merging otherwise
+	if (mesh.nodes.size() > 1 && settings.mesh_instancing)
+	{
+		mesh.instances.resize(mesh.nodes.size());
+
+		for (size_t j = 0; j < mesh.nodes.size(); ++j)
+			cgltf_node_transform_world(mesh.nodes[j], mesh.instances[j].data);
+
+		mesh.nodes.clear();
+		mesh.scene = scene;
+	}
+	else if (canTransformMesh(mesh))
+	{
+		mergeMeshInstances(mesh);
+
+		assert(mesh.nodes.empty());
+		mesh.scene = scene;
+	}
+}
+
 static bool isExtensionSupported(const ExtensionInfo* extensions, size_t count, const char* name)
 {
 	for (size_t i = 0; i < count; ++i)
@@ -276,9 +338,7 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 	}
 
 	for (size_t i = 0; i < animations.size(); ++i)
-	{
 		processAnimation(animations[i], settings);
-	}
 
 	std::vector<NodeInfo> nodes(data->nodes_count);
 
@@ -286,68 +346,7 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 	markAnimated(data, nodes, animations);
 
 	for (size_t i = 0; i < meshes.size(); ++i)
-	{
-		Mesh& mesh = meshes[i];
-
-		// mesh is already instanced, skip
-		if (!mesh.instances.empty())
-			continue;
-
-		// mesh is already world space, skip
-		if (mesh.nodes.empty())
-			continue;
-
-		// note: when -kn is specified, we keep mesh-node attachment so that named nodes can be transformed
-		if (settings.keep_nodes)
-			continue;
-
-		// we keep skinned meshes or meshes with morph targets as is
-		// in theory we could transform both, but in practice transforming morph target meshes is more involved,
-		// and reparenting skinned meshes leads to incorrect bounding box generated in three.js
-		if (mesh.skin || mesh.targets)
-			continue;
-
-		bool any_animated = false;
-		for (size_t j = 0; j < mesh.nodes.size(); ++j)
-			any_animated |= nodes[mesh.nodes[j] - data->nodes].animated;
-
-		// animated meshes will be anchored to the same node that they used to be in to retain the animation
-		if (any_animated)
-			continue;
-
-		int scene = nodes[mesh.nodes[0] - data->nodes].scene;
-		bool any_other_scene = false;
-		for (size_t j = 0; j < mesh.nodes.size(); ++j)
-			any_other_scene |= scene != nodes[mesh.nodes[j] - data->nodes].scene;
-
-		// we only merge instances when all nodes have a single consistent scene
-		if (scene < 0 || any_other_scene)
-			continue;
-
-		// we only merge multiple instances together if requested
-		// this often makes the scenes faster to render by reducing the draw call count, but can result in larger files
-		if (mesh.nodes.size() > 1 && !settings.mesh_merge && !settings.mesh_instancing)
-			continue;
-
-		// prefer instancing if possible, use merging otherwise
-		if (mesh.nodes.size() > 1 && settings.mesh_instancing)
-		{
-			mesh.instances.resize(mesh.nodes.size());
-
-			for (size_t j = 0; j < mesh.nodes.size(); ++j)
-				cgltf_node_transform_world(mesh.nodes[j], mesh.instances[j].data);
-
-			mesh.nodes.clear();
-			mesh.scene = scene;
-		}
-		else if (canTransformMesh(mesh))
-		{
-			mergeMeshInstances(mesh);
-
-			assert(mesh.nodes.empty());
-			mesh.scene = scene;
-		}
-	}
+		detachMesh(meshes[i], data, nodes, settings);
 
 	// material information is required for mesh and image processing
 	std::vector<MaterialInfo> materials(data->materials_count);
@@ -376,7 +375,8 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 			mi.unlit &= vi.unlit;
 		}
 
-		filterStreams(mesh, mi);
+		if (!settings.keep_attributes)
+			filterStreams(mesh, mi);
 	}
 
 	mergeMeshMaterials(data, meshes, settings);
@@ -412,9 +412,7 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 #endif
 
 	for (size_t i = 0; i < meshes.size(); ++i)
-	{
 		processMesh(meshes[i], settings);
-	}
 
 #ifndef NDEBUG
 	meshes.insert(meshes.end(), debug_meshes.begin(), debug_meshes.end());
@@ -569,7 +567,7 @@ static void process(cgltf_data* data, const char* input_path, const char* output
 		{
 			const Mesh& prim = meshes[pi];
 
-			if (prim.skin != mesh.skin || prim.targets != mesh.targets)
+			if (prim.scene != mesh.scene || prim.skin != mesh.skin || prim.targets != mesh.targets)
 				break;
 
 			if (pi > i && (mesh.instances.size() || prim.instances.size()))
@@ -1319,6 +1317,10 @@ int main(int argc, char** argv)
 		{
 			settings.keep_extras = true;
 		}
+		else if (strcmp(arg, "-kv") == 0)
+		{
+			settings.keep_attributes = true;
+		}
 		else if (strcmp(arg, "-mm") == 0)
 		{
 			settings.mesh_merge = true;
@@ -1555,6 +1557,7 @@ int main(int argc, char** argv)
 			fprintf(stderr, "\nVertex attributes:\n");
 			fprintf(stderr, "\t-vtf: use floating point attributes for texture coordinates\n");
 			fprintf(stderr, "\t-vnf: use floating point attributes for normals\n");
+			fprintf(stderr, "\t-kv: keep source vertex attributes even if they aren't used\n");
 			fprintf(stderr, "\nAnimations:\n");
 			fprintf(stderr, "\t-at N: use N-bit quantization for translations (default: 16; N should be between 1 and 24)\n");
 			fprintf(stderr, "\t-ar N: use N-bit quantization for rotations (default: 12; N should be between 4 and 16)\n");
