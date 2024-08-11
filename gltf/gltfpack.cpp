@@ -16,13 +16,13 @@
 #include "../src/meshoptimizer.h"
 
 // copycd::. need to chage when programe is changed.
-auto programVersion = "5.2407.26";
+auto programVersion = "5.2408.11";
 
 std::string getVersion()
 {
 	char result[32];
 	// copycd:: because of error
-	sprintf_s(result, sizeof(result), "%d.%d.2407", MESHOPTIMIZER_VERSION / 1000, (MESHOPTIMIZER_VERSION % 1000) / 10);
+	sprintf_s(result, sizeof(result), "%d.%d.2408", MESHOPTIMIZER_VERSION / 1000, (MESHOPTIMIZER_VERSION % 1000) / 10);
 	return result;
 }
 
@@ -1481,10 +1481,10 @@ int main(int argc, char** argv)
 		}
 	}
 
-	// copycd:: 한때, thread를 적용하면, 오류가 있어서
-	// 강제로 thread count=1 로 막아서 수행했는데.
-	// 현재는 버그가 없는것 같아서, 적용하지 않음.
-	//settings.texture_jobs = 1;
+	// copycd:: 한때, thread를 적용하면, 오류가 있어서 count=1로 했으나 이제는 버그가 없음.
+	// 그러나, 외부에서 thread로 gltfpack을 실행할때, 여기서도 thread를 사용하면 부하가 걸림.
+	// 그래서, 기본으로 1로 수행함. thread를 수행하려면, 옵션으로 갯수를 지정하면됨.
+	settings.texture_jobs = 1;
 
 	// copycd::
 	if (settings.verbose > 0)
