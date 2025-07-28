@@ -17,13 +17,13 @@
 #include "../src/meshoptimizer.h"
 
 // copycd::. need to chage when programe is changed.
-auto programVersion = "5.2410.26";
+auto programVersion = "5.2507.28";
 
 std::string getVersion()
 {
 	char result[32];
 	// copycd:: because of error
-	sprintf_s(result, sizeof(result), "%d.%d.2410", MESHOPTIMIZER_VERSION / 1000, (MESHOPTIMIZER_VERSION % 1000) / 10);
+	sprintf_s(result, sizeof(result), "%d.%d.2507", MESHOPTIMIZER_VERSION / 1000, (MESHOPTIMIZER_VERSION % 1000) / 10);
 	return result;
 }
 
