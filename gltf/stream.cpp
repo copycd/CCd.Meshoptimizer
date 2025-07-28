@@ -24,10 +24,25 @@ struct Bounds
 	{
 		return min.f[0] <= max.f[0] && min.f[1] <= max.f[1] && min.f[2] <= max.f[2] && min.f[3] <= max.f[3];
 	}
+
+	float getExtent() const
+	{
+		return std::max(max.f[0] - min.f[0], std::max(max.f[1] - min.f[1], max.f[2] - min.f[2]));
+	}
+
+	void merge(const Bounds& other)
+	{
+		for (int k = 0; k < 4; ++k)
+		{
+			min.f[k] = std::min(min.f[k], other.min.f[k]);
+			max.f[k] = std::max(max.f[k], other.max.f[k]);
+		}
+	}
 };
 
-static void updateAttributeBounds(const Mesh& mesh, cgltf_attribute_type type, Bounds& b)
+static Bounds computeBounds(const Mesh& mesh, cgltf_attribute_type type)
 {
+	Bounds b;
 	Attr pad = {};
 
 	for (size_t j = 0; j < mesh.streams.size(); ++j)
@@ -73,6 +88,8 @@ static void updateAttributeBounds(const Mesh& mesh, cgltf_attribute_type type, B
 		b.min.f[k] -= pad.f[k];
 		b.max.f[k] += pad.f[k];
 	}
+
+	return b;
 }
 
 QuantizationPosition prepareQuantizationPosition(const std::vector<Mesh>& meshes, const Settings& settings)
@@ -82,19 +99,34 @@ QuantizationPosition prepareQuantizationPosition(const std::vector<Mesh>& meshes
 	result.bits = settings.pos_bits;
 	result.normalized = settings.pos_normalized;
 
-	Bounds b;
+	std::vector<Bounds> bounds(meshes.size());
 
 	for (size_t i = 0; i < meshes.size(); ++i)
-	{
-		updateAttributeBounds(meshes[i], cgltf_attribute_type_position, b);
-	}
+		bounds[i] = computeBounds(meshes[i], cgltf_attribute_type_position);
+
+	Bounds b;
+	for (size_t i = 0; i < meshes.size(); ++i)
+		b.merge(bounds[i]);
 
 	if (b.isValid())
 	{
 		result.offset[0] = b.min.f[0];
 		result.offset[1] = b.min.f[1];
 		result.offset[2] = b.min.f[2];
-		result.scale = std::max(b.max.f[0] - b.min.f[0], std::max(b.max.f[1] - b.min.f[1], b.max.f[2] - b.min.f[2]));
+		result.scale = b.getExtent();
+	}
+
+	if (b.isValid() && settings.quantize && !settings.pos_float)
+	{
+		float error = result.scale * 0.5f / (1 << (result.bits - 1));
+		float max_rel_error = 0;
+
+		for (size_t i = 0; i < meshes.size(); ++i)
+			if (bounds[i].isValid() && bounds[i].getExtent() > 1e-2f)
+				max_rel_error = std::max(max_rel_error, error / bounds[i].getExtent());
+
+		if (max_rel_error > 5e-2f)
+			fprintf(stderr, "Warning: position data has significant error (%.0f%%); consider using floating-point quantization (-vpf) or more bits (-vp N)\n", max_rel_error * 100);
 	}
 
 	result.node_scale = result.scale / float((1 << result.bits) - 1) * (result.normalized ? 65535.f : 1.f);
@@ -154,7 +186,9 @@ void prepareQuantizationTexture(cgltf_data* data, std::vector<QuantizationTextur
 			continue;
 
 		indices[i] = follow(parents, indices[i]);
-		updateAttributeBounds(mesh, cgltf_attribute_type_texcoord, bounds[indices[i]]);
+
+		Bounds mb = computeBounds(mesh, cgltf_attribute_type_texcoord);
+		bounds[indices[i]].merge(mb);
 	}
 
 	// update all material data using canonical bounds
@@ -279,6 +313,45 @@ static void encodeSnorm(void* destination, size_t count, size_t stride, int bits
 	}
 }
 
+static int quantizeColor(float v, int bytebits, int bits)
+{
+	int result = meshopt_quantizeUnorm(v, bytebits);
+
+	// replicate the top bit into the low significant bits
+	const int mask = (1 << (bytebits - bits)) - 1;
+
+	return (result & ~mask) | (mask & -(result >> (bytebits - 1)));
+}
+
+static void encodeColor(void* destination, size_t count, size_t stride, int bits, const float* data)
+{
+	assert(stride == 4 || stride == 8);
+	assert(bits >= 2 && bits <= 16);
+
+	unsigned char* d8 = static_cast<unsigned char*>(destination);
+	unsigned short* d16 = static_cast<unsigned short*>(destination);
+
+	for (size_t i = 0; i < count; ++i)
+	{
+		const float* c = &data[i * 4];
+
+		if (stride == 4)
+		{
+			d8[i * 4 + 0] = uint8_t(quantizeColor(c[0], 8, bits));
+			d8[i * 4 + 1] = uint8_t(quantizeColor(c[1], 8, bits));
+			d8[i * 4 + 2] = uint8_t(quantizeColor(c[2], 8, bits));
+			d8[i * 4 + 3] = uint8_t(quantizeColor(c[3], 8, bits));
+		}
+		else
+		{
+			d16[i * 4 + 0] = uint16_t(quantizeColor(c[0], 16, bits));
+			d16[i * 4 + 1] = uint16_t(quantizeColor(c[1], 16, bits));
+			d16[i * 4 + 2] = uint16_t(quantizeColor(c[2], 16, bits));
+			d16[i * 4 + 3] = uint16_t(quantizeColor(c[3], 16, bits));
+		}
+	}
+}
+
 static StreamFormat writeVertexStreamRaw(std::string& bin, const Stream& stream, cgltf_type type, size_t components)
 {
 	assert(components >= 1 && components <= 4);
@@ -324,16 +397,6 @@ static StreamFormat writeVertexStreamFloat(std::string& bin, const Stream& strea
 
 	StreamFormat format = {type, cgltf_component_type_r_32f, false, sizeof(float) * components, filter};
 	return format;
-}
-
-static int quantizeColor(float v, int bytebits, int bits)
-{
-	int result = meshopt_quantizeUnorm(v, bytebits);
-
-	// replicate the top bit into the low significant bits
-	const int mask = (1 << (bytebits - bits)) - 1;
-
-	return (result & ~mask) | (mask & -(result >> (bytebits - 1)));
 }
 
 StreamFormat writeVertexStream(std::string& bin, const Stream& stream, const QuantizationPosition& qp, const QuantizationTexture& qt, const Settings& settings)
@@ -497,40 +560,28 @@ StreamFormat writeVertexStream(std::string& bin, const Stream& stream, const Qua
 	}
 	else if (stream.type == cgltf_attribute_type_color)
 	{
+		bool col = settings.compressexp && settings.compressmore;
 		int bits = settings.col_bits;
 
-		for (size_t i = 0; i < stream.data.size(); ++i)
-		{
-			const Attr& a = stream.data[i];
+		StreamFormat::Filter filter = col ? StreamFormat::Filter_Color : StreamFormat::Filter_None;
 
-			if (bits > 8)
-			{
-				uint16_t v[4] = {
-				    uint16_t(quantizeColor(a.f[0], 16, bits)),
-				    uint16_t(quantizeColor(a.f[1], 16, bits)),
-				    uint16_t(quantizeColor(a.f[2], 16, bits)),
-				    uint16_t(quantizeColor(a.f[3], 16, bits))};
-				bin.append(reinterpret_cast<const char*>(v), sizeof(v));
-			}
-			else
-			{
-				uint8_t v[4] = {
-				    uint8_t(quantizeColor(a.f[0], 8, bits)),
-				    uint8_t(quantizeColor(a.f[1], 8, bits)),
-				    uint8_t(quantizeColor(a.f[2], 8, bits)),
-				    uint8_t(quantizeColor(a.f[3], 8, bits))};
-				bin.append(reinterpret_cast<const char*>(v), sizeof(v));
-			}
-		}
+		size_t offset = bin.size();
+		size_t stride = bits > 8 ? 8 : 4;
+		bin.resize(bin.size() + stream.data.size() * stride);
+
+		if (col)
+			meshopt_encodeFilterColor(&bin[offset], stream.data.size(), stride, bits, stream.data[0].f);
+		else
+			encodeColor(&bin[offset], stream.data.size(), stride, bits, stream.data[0].f);
 
 		if (bits > 8)
 		{
-			StreamFormat format = {cgltf_type_vec4, cgltf_component_type_r_16u, true, 8};
+			StreamFormat format = {cgltf_type_vec4, cgltf_component_type_r_16u, true, 8, filter};
 			return format;
 		}
 		else
 		{
-			StreamFormat format = {cgltf_type_vec4, cgltf_component_type_r_8u, true, 4};
+			StreamFormat format = {cgltf_type_vec4, cgltf_component_type_r_8u, true, 4, filter};
 			return format;
 		}
 	}
@@ -701,11 +752,11 @@ StreamFormat writeTimeStream(std::string& bin, const std::vector<float>& data)
 	return format;
 }
 
-StreamFormat writeKeyframeStream(std::string& bin, cgltf_animation_path_type type, const std::vector<Attr>& data, const Settings& settings)
+StreamFormat writeKeyframeStream(std::string& bin, cgltf_animation_path_type type, const std::vector<Attr>& data, const Settings& settings, bool has_tangents)
 {
 	if (type == cgltf_animation_path_type_rotation)
 	{
-		StreamFormat::Filter filter = settings.compressmore ? StreamFormat::Filter_Quat : StreamFormat::Filter_None;
+		StreamFormat::Filter filter = settings.compressmore && !has_tangents ? StreamFormat::Filter_Quat : StreamFormat::Filter_None;
 
 		size_t offset = bin.size();
 		size_t stride = 8;

@@ -17,12 +17,14 @@ GLTFPACK_OBJECTS=$(GLTFPACK_SOURCES:%=$(BUILD)/%.o)
 OBJECTS=$(LIBRARY_OBJECTS) $(DEMO_OBJECTS) $(GLTFPACK_OBJECTS)
 
 LIBRARY=$(BUILD)/libmeshoptimizer.a
-DEMO=$(BUILD)/meshoptimizer
+DEMO=$(BUILD)/meshoptdemo
 
 CFLAGS=-g -Wall -Wextra -std=c89
-CXXFLAGS=-g -Wall -Wextra -Wshadow -Wno-missing-field-initializers -std=gnu++98
+CXXFLAGS=-g -Wall -Wextra -Wshadow -Wno-missing-field-initializers
 LDFLAGS=
 
+$(LIBRARY_OBJECTS): CXXFLAGS+=-std=gnu++98
+$(DEMO_OBJECTS): CXXFLAGS+=-std=c++11
 $(GLTFPACK_OBJECTS): CXXFLAGS+=-std=c++11
 
 ifdef BASISU
@@ -35,11 +37,7 @@ ifdef BASISU
     endif
 endif
 
-ifdef METIS
-    $(DEMO_OBJECTS): CXXFLAGS+=-DMETIS
-    $(DEMO): LDFLAGS+=-lmetis
-endif
-
+WASI_SDK?=/opt/wasi-sdk
 WASMCC?=$(WASI_SDK)/bin/clang++
 WASIROOT?=$(WASI_SDK)/share/wasi-sysroot
 
@@ -52,13 +50,13 @@ WASM_FLAGS+=-Wl,-z -Wl,stack-size=36864 -Wl,--initial-memory=65536
 WASM_EXPORT_PREFIX=-Wl,--export
 
 WASM_DECODER_SOURCES=src/vertexcodec.cpp src/indexcodec.cpp src/vertexfilter.cpp tools/wasmstubs.cpp
-WASM_DECODER_EXPORTS=meshopt_decodeVertexBuffer meshopt_decodeIndexBuffer meshopt_decodeIndexSequence meshopt_decodeFilterOct meshopt_decodeFilterQuat meshopt_decodeFilterExp sbrk __wasm_call_ctors
+WASM_DECODER_EXPORTS=meshopt_decodeVertexBuffer meshopt_decodeIndexBuffer meshopt_decodeIndexSequence meshopt_decodeFilterOct meshopt_decodeFilterQuat meshopt_decodeFilterExp meshopt_decodeFilterColor sbrk __wasm_call_ctors
 
 WASM_ENCODER_SOURCES=src/vertexcodec.cpp src/indexcodec.cpp src/vertexfilter.cpp src/vcacheoptimizer.cpp src/vfetchoptimizer.cpp src/spatialorder.cpp tools/wasmstubs.cpp
-WASM_ENCODER_EXPORTS=meshopt_encodeVertexBuffer meshopt_encodeVertexBufferBound meshopt_encodeIndexBuffer meshopt_encodeIndexBufferBound meshopt_encodeIndexSequence meshopt_encodeIndexSequenceBound meshopt_encodeVertexVersion meshopt_encodeIndexVersion meshopt_encodeFilterOct meshopt_encodeFilterQuat meshopt_encodeFilterExp meshopt_optimizeVertexCache meshopt_optimizeVertexCacheStrip meshopt_optimizeVertexFetchRemap meshopt_spatialSortRemap sbrk __wasm_call_ctors
+WASM_ENCODER_EXPORTS=meshopt_encodeVertexBuffer meshopt_encodeVertexBufferBound meshopt_encodeVertexBufferLevel meshopt_encodeIndexBuffer meshopt_encodeIndexBufferBound meshopt_encodeIndexSequence meshopt_encodeIndexSequenceBound meshopt_encodeVertexVersion meshopt_encodeIndexVersion meshopt_encodeFilterOct meshopt_encodeFilterQuat meshopt_encodeFilterExp meshopt_encodeFilterColor meshopt_optimizeVertexCache meshopt_optimizeVertexCacheStrip meshopt_optimizeVertexFetchRemap meshopt_spatialSortRemap sbrk __wasm_call_ctors
 
 WASM_SIMPLIFIER_SOURCES=src/simplifier.cpp src/vfetchoptimizer.cpp tools/wasmstubs.cpp
-WASM_SIMPLIFIER_EXPORTS=meshopt_simplify meshopt_simplifyWithAttributes meshopt_simplifyScale meshopt_simplifyPoints meshopt_optimizeVertexFetchRemap sbrk __wasm_call_ctors
+WASM_SIMPLIFIER_EXPORTS=meshopt_simplify meshopt_simplifyWithAttributes meshopt_simplifyScale meshopt_simplifyPoints meshopt_simplifySloppy meshopt_simplifyPrune meshopt_optimizeVertexFetchRemap sbrk __wasm_call_ctors
 
 WASM_CLUSTERIZER_SOURCES=src/clusterizer.cpp tools/wasmstubs.cpp
 WASM_CLUSTERIZER_EXPORTS=meshopt_buildMeshletsBound meshopt_buildMeshlets meshopt_computeClusterBounds meshopt_computeMeshletBounds meshopt_optimizeMeshlet sbrk __wasm_call_ctors
@@ -79,8 +77,8 @@ ifeq ($(config),trace)
 	CXXFLAGS+=-DTRACE=1
 endif
 
-ifeq ($(config),scalar)
-	CXXFLAGS+=-O3 -DNDEBUG -DMESHOPTIMIZER_NO_SIMD
+ifeq ($(config),tracev)
+	CXXFLAGS+=-DTRACE=2
 endif
 
 ifeq ($(config),release)
@@ -89,6 +87,19 @@ endif
 
 ifeq ($(config),coverage)
 	CXXFLAGS+=-coverage
+	LDFLAGS+=-coverage
+endif
+
+ifeq ($(config),release-avx512)
+	CXXFLAGS+=-O3 -DNDEBUG -mavx512vl -mavx512vbmi -mavx512vbmi2
+endif
+
+ifeq ($(config),release-scalar)
+	CXXFLAGS+=-O3 -DNDEBUG -DMESHOPTIMIZER_NO_SIMD
+endif
+
+ifeq ($(config),coverage-scalar)
+	CXXFLAGS+=-coverage -DMESHOPTIMIZER_NO_SIMD
 	LDFLAGS+=-coverage
 endif
 
@@ -217,6 +228,9 @@ codectest: tools/codectest.cpp $(LIBRARY)
 	$(CXX) $^ $(CXXFLAGS) $(LDFLAGS) -o $@
 
 codecfuzz: tools/codecfuzz.cpp src/vertexcodec.cpp src/indexcodec.cpp
+	$(CXX) $^ -fsanitize=fuzzer,address,undefined -O1 -g -o $@
+
+clusterfuzz: tools/clusterfuzz.cpp src/clusterizer.cpp
 	$(CXX) $^ -fsanitize=fuzzer,address,undefined -O1 -g -o $@
 
 simplifyfuzz: tools/simplifyfuzz.cpp src/simplifier.cpp
