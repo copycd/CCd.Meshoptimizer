@@ -305,6 +305,9 @@ struct BufferView
 	size_t bytes;
 };
 
+// copycd::
+int gltfMain(int argc, char** argv);
+
 std::string getTempPrefix();
 
 std::string getFullPath(const char* path, const char* base_path);

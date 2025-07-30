@@ -1258,7 +1258,8 @@ void applySetting(T (&data)[TextureKind__Count], T value, unsigned int mask = ~0
 }
 
 #ifndef GLTFFUZZ
-int main(int argc, char** argv)
+// copycd:: dll로만 사용할 계획임.
+int gltfMain(int argc, char** argv)
 {
 #ifndef __wasi__
 	setlocale(LC_ALL, "C"); // disable locale specific convention for number parsing/printing
