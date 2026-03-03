@@ -737,7 +737,7 @@ size_t getBufferView(std::vector<BufferView>& views, BufferView::Kind kind, Stre
 	return views.size() - 1;
 }
 
-void writeBufferView(std::string& json, BufferView::Kind kind, StreamFormat::Filter filter, size_t count, size_t stride, size_t bin_offset, size_t bin_size, BufferView::Compression compression, size_t compressed_offset, size_t compressed_size)
+void writeBufferView(std::string& json, BufferView::Kind kind, StreamFormat::Filter filter, size_t count, size_t stride, size_t bin_offset, size_t bin_size, BufferView::Compression compression, size_t compressed_offset, size_t compressed_size, const char* meshopt_ext)
 {
 	assert(bin_size == count * stride);
 
@@ -764,7 +764,9 @@ void writeBufferView(std::string& json, BufferView::Kind kind, StreamFormat::Fil
 	if (compression != BufferView::Compression_None)
 	{
 		append(json, ",\"extensions\":{");
-		append(json, "\"EXT_meshopt_compression\":{");
+		append(json, "\"");
+		append(json, meshopt_ext);
+		append(json, "\":{");
 		append(json, "\"buffer\":0");
 		append(json, ",\"byteOffset\":");
 		append(json, size_t(compressed_offset));
@@ -921,11 +923,13 @@ void writeImage(std::string& json, std::vector<BufferView>& views, const cgltf_i
 
 	if (encoded)
 	{
+		const char* mime_type = (settings.texture_mode[info.kind] == TextureMode_WebP) ? "image/webp" : "image/ktx2";
+
 		// image was pre-encoded via encodeImages (which might have failed!)
 		if (encoded->compare(0, 5, "error") == 0)
 			writeImageError(json, "encode", int(index), image.uri, encoded->c_str());
 		else
-			writeImageData(json, views, index, image.uri, "image/ktx2", *encoded, output_path, info.kind, settings.texture_embed);
+			writeImageData(json, views, index, image.uri, mime_type, *encoded, output_path, info.kind, settings.texture_embed);
 		return;
 	}
 
@@ -963,8 +967,12 @@ void writeTexture(std::string& json, const cgltf_texture& texture, const ImageIn
 	{
 		if (info && settings.texture_mode[info->kind] != TextureMode_Raw)
 		{
+			const char* texture_ext = (settings.texture_mode[info->kind] == TextureMode_WebP) ? "EXT_texture_webp" : "KHR_texture_basisu";
+
 			comma(json);
-			append(json, "\"extensions\":{\"KHR_texture_basisu\":{\"source\":");
+			append(json, "\"extensions\":{\"");
+			append(json, texture_ext);
+			append(json, "\":{\"source\":");
 			append(json, size_t(texture.image - data->images));
 			append(json, "}}");
 
@@ -994,8 +1002,108 @@ void writeTexture(std::string& json, const cgltf_texture& texture, const ImageIn
 	}
 }
 
+static void writePrimitiveAccessor(std::string& json_accessors, const Stream& stream, size_t view, size_t offset, const StreamFormat& format, const QuantizationPosition& qp, const Settings& settings)
+{
+	comma(json_accessors);
+	if (stream.type == cgltf_attribute_type_position)
+	{
+		float min[3] = {};
+		float max[3] = {};
+		getPositionBounds(min, max, stream, qp, settings);
+
+		writeAccessor(json_accessors, view, offset, format.type, format.component_type, format.normalized, stream.data.size(), min, max, 3);
+	}
+	else
+	{
+		writeAccessor(json_accessors, view, offset, format.type, format.component_type, format.normalized, stream.data.size());
+	}
+}
+
+static void writePrimitiveAttribute(std::string& json, const Stream& stream, size_t accessor)
+{
+	comma(json);
+	append(json, "\"");
+	if (stream.custom_name)
+	{
+		append(json, stream.custom_name);
+	}
+	else
+	{
+		append(json, attributeType(stream.type));
+		// copycd:: for _BATCHID 
+		if (stream.type != cgltf_attribute_type_position && stream.type != cgltf_attribute_type_normal && stream.type != cgltf_attribute_type_tangent && stream.type != cgltf_attribute_type_batchid)
+		{
+			append(json, "_");
+			append(json, size_t(stream.index));
+		}
+	}
+	append(json, "\":");
+	append(json, accessor);
+}
+
+static void writeMeshAttributesInterleaved(std::string& json, std::vector<BufferView>& views, std::string& json_accessors, size_t& accr_offset, const Mesh& mesh, int target, const QuantizationPosition& qp, const QuantizationTexture& qt, const Settings& settings)
+{
+	struct Attribute
+	{
+		const Stream* stream;
+		StreamFormat format;
+		std::string data;
+	};
+
+	std::vector<Attribute> attributes;
+	size_t stride = 0;
+
+	for (size_t j = 0; j < mesh.streams.size(); ++j)
+	{
+		const Stream& stream = mesh.streams[j];
+
+		if (stream.target != target)
+			continue;
+
+		Attribute attr = {&stream};
+		attr.format = writeVertexStream(attr.data, stream, qp, qt, settings, /* filters= */ false);
+		assert(attr.format.filter == StreamFormat::Filter_None);
+
+		stride += attr.format.stride;
+		attributes.emplace_back(std::move(attr));
+	}
+
+	BufferView::Compression compression = settings.compress ? BufferView::Compression_Attribute : BufferView::Compression_None;
+	size_t view = getBufferView(views, BufferView::Kind_Vertex, StreamFormat::Filter_None, compression, stride, 0);
+	size_t offset = views[view].data.size();
+
+	size_t vertex_count = mesh.streams[0].data.size();
+
+	views[view].data.resize(views[view].data.size() + stride * vertex_count);
+
+	size_t write_offset = offset;
+
+	for (size_t i = 0; i < vertex_count; ++i)
+		for (Attribute& attr : attributes)
+		{
+			memcpy(&views[view].data[write_offset], &attr.data[i * attr.format.stride], attr.format.stride);
+			write_offset += attr.format.stride;
+		}
+
+	for (Attribute& attr : attributes)
+	{
+		const Stream& stream = *attr.stream;
+		const StreamFormat& format = attr.format;
+
+		writePrimitiveAccessor(json_accessors, stream, view, offset, format, qp, settings);
+
+		size_t vertex_accr = accr_offset++;
+		writePrimitiveAttribute(json, stream, vertex_accr);
+
+		offset += attr.format.stride;
+	}
+}
+
 void writeMeshAttributes(std::string& json, std::vector<BufferView>& views, std::string& json_accessors, size_t& accr_offset, const Mesh& mesh, int target, const QuantizationPosition& qp, const QuantizationTexture& qt, const Settings& settings)
 {
+	if (settings.mesh_interleaved)
+		return writeMeshAttributesInterleaved(json, views, json_accessors, accr_offset, mesh, target, qp, qt, settings);
+
 	std::string scratch;
 
 	for (size_t j = 0; j < mesh.streams.size(); ++j)
@@ -1013,40 +1121,10 @@ void writeMeshAttributes(std::string& json, std::vector<BufferView>& views, std:
 		size_t offset = views[view].data.size();
 		views[view].data += scratch;
 
-		comma(json_accessors);
-		if (stream.type == cgltf_attribute_type_position)
-		{
-			float min[3] = {};
-			float max[3] = {};
-			getPositionBounds(min, max, stream, qp, settings);
-
-			writeAccessor(json_accessors, view, offset, format.type, format.component_type, format.normalized, stream.data.size(), min, max, 3);
-		}
-		else
-		{
-			writeAccessor(json_accessors, view, offset, format.type, format.component_type, format.normalized, stream.data.size());
-		}
+		writePrimitiveAccessor(json_accessors, stream, view, offset, format, qp, settings);
 
 		size_t vertex_accr = accr_offset++;
-
-		comma(json);
-		append(json, "\"");
-		if (stream.custom_name)
-		{
-			append(json, stream.custom_name);
-		}
-		else
-		{
-			append(json, attributeType(stream.type));
-			// copycd:: for _BATCHID 
-			if (stream.type != cgltf_attribute_type_position && stream.type != cgltf_attribute_type_normal && stream.type != cgltf_attribute_type_tangent && stream.type != cgltf_attribute_type_batchid)
-			{
-				append(json, "_");
-				append(json, size_t(stream.index));
-			}
-		}
-		append(json, "\":");
-		append(json, vertex_accr);
+		writePrimitiveAttribute(json, stream, vertex_accr);
 	}
 }
 
@@ -1064,7 +1142,6 @@ size_t writeMeshIndices(std::vector<BufferView>& views, std::string& json_access
 	writeAccessor(json_accessors, view, offset, format.type, format.component_type, format.normalized, indices.size());
 
 	size_t index_accr = accr_offset++;
-
 	return index_accr;
 }
 
@@ -1114,7 +1191,6 @@ static size_t writeAnimationTime(std::vector<BufferView>& views, std::string& js
 	writeAccessor(json_accessors, view, offset, cgltf_type_scalar, format.component_type, format.normalized, time.size(), &time.front(), &time.back(), 1);
 
 	size_t time_accr = accr_offset++;
-
 	return time_accr;
 }
 
@@ -1166,7 +1242,6 @@ size_t writeJointBindMatrices(std::vector<BufferView>& views, std::string& json_
 	writeAccessor(json_accessors, view, offset, cgltf_type_mat4, cgltf_component_type_r_32f, false, skin.joints_count);
 
 	size_t matrix_accr = accr_offset++;
-
 	return matrix_accr;
 }
 
@@ -1185,20 +1260,24 @@ static void writeInstanceData(std::vector<BufferView>& views, std::string& json_
 	writeAccessor(json_accessors, view, offset, format.type, format.component_type, format.normalized, data.size());
 }
 
-size_t writeInstances(std::vector<BufferView>& views, std::string& json_accessors, size_t& accr_offset, const std::vector<Transform>& transforms, const QuantizationPosition& qp, const Settings& settings)
+size_t writeInstances(std::vector<BufferView>& views, std::string& json_accessors, size_t& accr_offset, const std::vector<Instance>& instances, const QuantizationPosition& qp, bool has_color, const Settings& settings)
 {
 	std::vector<Attr> position, rotation, scale;
-	position.resize(transforms.size());
-	rotation.resize(transforms.size());
-	scale.resize(transforms.size());
+	position.resize(instances.size());
+	rotation.resize(instances.size());
+	scale.resize(instances.size());
 
-	for (size_t i = 0; i < transforms.size(); ++i)
+	Stream color = {cgltf_attribute_type_color};
+	if (has_color)
+		color.data.resize(instances.size());
+
+	for (size_t i = 0; i < instances.size(); ++i)
 	{
-		decomposeTransform(position[i].f, rotation[i].f, scale[i].f, transforms[i].data);
+		decomposeTransform(position[i].f, rotation[i].f, scale[i].f, instances[i].transform);
 
 		if (settings.quantize && !settings.pos_float)
 		{
-			const float* transform = transforms[i].data;
+			const float* transform = instances[i].transform;
 
 			// pos_offset has to be applied first, thus it results in an offset rotated by the instance matrix
 			position[i].f[0] += qp.offset[0] * transform[0] + qp.offset[1] * transform[4] + qp.offset[2] * transform[8];
@@ -1210,6 +1289,9 @@ size_t writeInstances(std::vector<BufferView>& views, std::string& json_accessor
 			scale[i].f[1] *= qp.node_scale;
 			scale[i].f[2] *= qp.node_scale;
 		}
+
+		if (has_color)
+			memcpy(color.data[i].f, instances[i].color, sizeof(Attr));
 	}
 
 	writeInstanceData(views, json_accessors, cgltf_animation_path_type_translation, position, settings);
@@ -1218,6 +1300,23 @@ size_t writeInstances(std::vector<BufferView>& views, std::string& json_accessor
 
 	size_t result = accr_offset;
 	accr_offset += 3;
+
+	if (has_color)
+	{
+		BufferView::Compression compression = settings.compress ? BufferView::Compression_Attribute : BufferView::Compression_None;
+
+		std::string scratch;
+		StreamFormat format = writeVertexStream(scratch, color, QuantizationPosition(), QuantizationTexture(), settings);
+
+		size_t view = getBufferView(views, BufferView::Kind_Instance, format.filter, compression, format.stride, 0);
+		size_t offset = views[view].data.size();
+		views[view].data += scratch;
+
+		comma(json_accessors);
+		writeAccessor(json_accessors, view, offset, format.type, format.component_type, format.normalized, instances.size());
+		accr_offset += 1;
+	}
+
 	return result;
 }
 
@@ -1251,7 +1350,7 @@ void writeMeshNode(std::string& json, size_t mesh_offset, cgltf_node* node, cglt
 	append(json, "}");
 }
 
-void writeMeshNodeInstanced(std::string& json, size_t mesh_offset, size_t accr_offset)
+void writeMeshNodeInstanced(std::string& json, size_t mesh_offset, size_t accr_offset, bool has_color)
 {
 	comma(json);
 	append(json, "{\"mesh\":");
@@ -1269,6 +1368,13 @@ void writeMeshNodeInstanced(std::string& json, size_t mesh_offset, size_t accr_o
 	comma(json);
 	append(json, "\"SCALE\":");
 	append(json, accr_offset + 2);
+
+	if (has_color)
+	{
+		comma(json);
+		append(json, "\"_COLOR_0\":");
+		append(json, accr_offset + 3);
+	}
 
 	append(json, "}}}");
 	append(json, "}");

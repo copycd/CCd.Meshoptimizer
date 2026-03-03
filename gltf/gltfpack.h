@@ -1,7 +1,7 @@
 /**
- * gltfpack - version 0.24
+ * gltfpack - version 1.0
  *
- * Copyright (C) 2016-2025, by Arseny Kapoulkine (arseny.kapoulkine@gmail.com)
+ * Copyright (C) 2016-2026, by Arseny Kapoulkine (arseny.kapoulkine@gmail.com)
  * Report bugs and download new versions at https://github.com/zeux/meshoptimizer
  *
  * This application is distributed under the MIT License. See notice at the end of this file.
@@ -41,16 +41,17 @@ struct Stream
 	std::vector<Attr> data;
 };
 
-struct Transform
+struct Instance
 {
-	float data[16];
+	float transform[16];
+	float color[4];
 };
 
 struct Mesh
 {
 	int scene;
 	std::vector<cgltf_node*> nodes;
-	std::vector<Transform> instances;
+	std::vector<Instance> instances;
 
 	cgltf_material* material;
 	cgltf_skin* skin;
@@ -115,6 +116,7 @@ enum TextureMode
 	TextureMode_Raw,
 	TextureMode_ETC1S,
 	TextureMode_UASTC,
+	TextureMode_WebP,
 };
 
 struct Settings
@@ -144,6 +146,7 @@ struct Settings
 	bool mesh_dedup;
 	bool mesh_merge;
 	bool mesh_instancing;
+	bool mesh_interleaved;
 
 	float simplify_ratio;
 	float simplify_error;
@@ -151,8 +154,10 @@ struct Settings
 	bool simplify_lock_borders;
 	bool simplify_attributes;
 	bool simplify_scaled;
+	bool simplify_permissive;
 
 	bool texture_ktx2;
+	bool texture_webp;
 	bool texture_embed;
 	bool texture_ref;
 
@@ -170,7 +175,7 @@ struct Settings
 
 	bool compress;
 	bool compressmore;
-	bool compressexp;
+	bool compresskhr;
 	bool fallback;
 
 	int verbose;
@@ -356,7 +361,11 @@ void adjustDimensions(int& width, int& height, float scale, int limit, bool pow2
 const char* mimeExtension(const char* mime_type);
 
 #ifdef WITH_BASISU
-void encodeImages(std::string* encoded, const cgltf_data* data, const std::vector<ImageInfo>& images, const char* input_path, const Settings& settings);
+void encodeImagesBasis(std::string* encoded, const cgltf_data* data, const std::vector<ImageInfo>& images, const char* input_path, const Settings& settings);
+#endif
+
+#ifdef WITH_LIBWEBP
+void encodeImagesWebP(std::string* encoded, const cgltf_data* data, const std::vector<ImageInfo>& images, const char* input_path, const Settings& settings);
 #endif
 
 void markScenes(cgltf_data* data, std::vector<NodeInfo>& nodes);
@@ -367,18 +376,19 @@ void decomposeTransform(float translation[3], float rotation[4], float scale[3],
 
 void computeMeshQuality(std::vector<Mesh>& meshes);
 
-bool hasAlpha(const Mesh& mesh);
+bool hasVertexAlpha(const Mesh& mesh);
+bool hasInstanceAlpha(const std::vector<Instance>& instances);
 
 QuantizationPosition prepareQuantizationPosition(const std::vector<Mesh>& meshes, const Settings& settings);
 void prepareQuantizationTexture(cgltf_data* data, std::vector<QuantizationTexture>& result, std::vector<size_t>& indices, const std::vector<Mesh>& meshes, const Settings& settings);
 void getPositionBounds(float min[3], float max[3], const Stream& stream, const QuantizationPosition& qp, const Settings& settings);
 
-StreamFormat writeVertexStream(std::string& bin, const Stream& stream, const QuantizationPosition& qp, const QuantizationTexture& qt, const Settings& settings);
+StreamFormat writeVertexStream(std::string& bin, const Stream& stream, const QuantizationPosition& qp, const QuantizationTexture& qt, const Settings& settings, bool filters = true);
 StreamFormat writeIndexStream(std::string& bin, const std::vector<unsigned int>& stream);
 StreamFormat writeTimeStream(std::string& bin, const std::vector<float>& data);
 StreamFormat writeKeyframeStream(std::string& bin, cgltf_animation_path_type type, const std::vector<Attr>& data, const Settings& settings, bool has_tangents = false);
 
-void compressVertexStream(std::string& bin, const std::string& data, size_t count, size_t stride);
+void compressVertexStream(std::string& bin, const std::string& data, size_t count, size_t stride, int level);
 void compressIndexStream(std::string& bin, const std::string& data, size_t count, size_t stride);
 void compressIndexSequence(std::string& bin, const std::string& data, size_t count, size_t stride);
 
@@ -396,7 +406,7 @@ const char* attributeType(cgltf_attribute_type type);
 const char* animationPath(cgltf_animation_path_type type);
 
 void writeMaterial(std::string& json, const cgltf_data* data, const cgltf_material& material, const QuantizationPosition* qp, const QuantizationTexture* qt, std::vector<TextureInfo>& textures);
-void writeBufferView(std::string& json, BufferView::Kind kind, StreamFormat::Filter filter, size_t count, size_t stride, size_t bin_offset, size_t bin_size, BufferView::Compression compression, size_t compressed_offset, size_t compressed_size);
+void writeBufferView(std::string& json, BufferView::Kind kind, StreamFormat::Filter filter, size_t count, size_t stride, size_t bin_offset, size_t bin_size, BufferView::Compression compression, size_t compressed_offset, size_t compressed_size, const char* meshopt_ext);
 void writeSampler(std::string& json, const cgltf_sampler& sampler);
 void writeImage(std::string& json, std::vector<BufferView>& views, const cgltf_image& image, const ImageInfo& info, const std::string* encoded, size_t index, const char* input_path, const char* output_path, const Settings& settings);
 void writeTexture(std::string& json, const cgltf_texture& texture, const ImageInfo* info, cgltf_data* data, const Settings& settings);
@@ -404,9 +414,9 @@ void writeMeshAttributes(std::string& json, std::vector<BufferView>& views, std:
 size_t writeMeshIndices(std::vector<BufferView>& views, std::string& json_accessors, size_t& accr_offset, const std::vector<unsigned int>& indices, cgltf_primitive_type type, const Settings& settings);
 void writeMeshGeometry(std::string& json, std::vector<BufferView>& views, std::string& json_accessors, size_t& accr_offset, const Mesh& mesh, const QuantizationPosition& qp, const QuantizationTexture& qt, const Settings& settings);
 size_t writeJointBindMatrices(std::vector<BufferView>& views, std::string& json_accessors, size_t& accr_offset, const cgltf_skin& skin, const QuantizationPosition& qp, const Settings& settings);
-size_t writeInstances(std::vector<BufferView>& views, std::string& json_accessors, size_t& accr_offset, const std::vector<Transform>& transforms, const QuantizationPosition& qp, const Settings& settings);
+size_t writeInstances(std::vector<BufferView>& views, std::string& json_accessors, size_t& accr_offset, const std::vector<Instance>& instances, const QuantizationPosition& qp, bool has_color, const Settings& settings);
 void writeMeshNode(std::string& json, size_t mesh_offset, cgltf_node* node, cgltf_skin* skin, cgltf_data* data, const QuantizationPosition* qp);
-void writeMeshNodeInstanced(std::string& json, size_t mesh_offset, size_t accr_offset);
+void writeMeshNodeInstanced(std::string& json, size_t mesh_offset, size_t accr_offset, bool has_color);
 void writeSkin(std::string& json, const cgltf_skin& skin, size_t matrix_accr, const std::vector<NodeInfo>& nodes, cgltf_data* data);
 void writeNode(std::string& json, const cgltf_node& node, const std::vector<NodeInfo>& nodes, cgltf_data* data);
 void writeAnimation(std::string& json, std::vector<BufferView>& views, std::string& json_accessors, size_t& accr_offset, const Animation& animation, size_t i, cgltf_data* data, const std::vector<NodeInfo>& nodes, const Settings& settings);
@@ -418,7 +428,7 @@ void writeExtras(std::string& json, const cgltf_extras& extras);
 void writeScene(std::string& json, const cgltf_scene& scene, const std::string& roots, const Settings& settings);
 
 /**
- * Copyright (c) 2016-2025 Arseny Kapoulkine
+ * Copyright (c) 2016-2026 Arseny Kapoulkine
  *
  * Permission is hereby granted, free of charge, to any person
  * obtaining a copy of this software and associated documentation

@@ -1,6 +1,6 @@
-var assert = require('assert').strict;
-var encoder = require('./meshopt_encoder.js');
-var decoder = require('./meshopt_decoder.js');
+import assert from 'assert/strict';
+import { MeshoptEncoder as encoder } from './meshopt_encoder.js';
+import { MeshoptDecoder as decoder } from './meshopt_decoder.mjs';
 
 process.on('unhandledRejection', (error) => {
 	console.log('unhandledRejection', error);
@@ -46,6 +46,28 @@ var tests = {
 		}
 
 		var encoded = encoder.encodeVertexBuffer(data, 16, 4);
+		assert.equal(encoded[0], 0xa1);
+
+		var decoded = new Uint8Array(16 * 4);
+		decoder.decodeVertexBuffer(decoded, 16, 4, encoded);
+
+		assert.deepEqual(decoded, data);
+	},
+
+	roundtripVertexBufferV1: function () {
+		var data = new Uint8Array(16 * 4);
+
+		// this tests 0/2/4/8 bit groups in one stream
+		for (var i = 0; i < 16; ++i) {
+			data[i * 4 + 0] = 0;
+			data[i * 4 + 1] = i * 1;
+			data[i * 4 + 2] = i * 2;
+			data[i * 4 + 3] = i * 8;
+		}
+
+		var encoded = encoder.encodeVertexBufferLevel(data, 16, 4, 3, /* version= */ 1);
+		assert.equal(encoded[0], 0xa1);
+
 		var decoded = new Uint8Array(16 * 4);
 		decoder.decodeVertexBuffer(decoded, 16, 4, encoded);
 
@@ -182,6 +204,29 @@ var tests = {
 		var decoded = new Uint32Array(data.length);
 		decoder.decodeGltfBuffer(bytes(decoded), data.length, 4, encoded, 'TRIANGLES');
 
+		assert.equal(encoded[0], 0xe1);
+		assert.deepEqual(decoded, data);
+	},
+
+	encodeGltfBufferAttribute: function () {
+		var data = new Uint32Array([0, 1, 2, 2, 1, 3, 4, 6, 5, 7, 8, 9]);
+
+		var encoded = encoder.encodeGltfBuffer(bytes(data), data.length, 4, 'ATTRIBUTES');
+		var decoded = new Uint32Array(data.length);
+		decoder.decodeGltfBuffer(bytes(decoded), data.length, 4, encoded, 'ATTRIBUTES');
+
+		assert.equal(encoded[0], 0xa0);
+		assert.deepEqual(decoded, data);
+	},
+
+	encodeGltfBufferAttributeV1: function () {
+		var data = new Uint32Array([0, 1, 2, 2, 1, 3, 4, 6, 5, 7, 8, 9]);
+
+		var encoded = encoder.encodeGltfBuffer(bytes(data), data.length, 4, 'ATTRIBUTES', 1);
+		var decoded = new Uint32Array(data.length);
+		decoder.decodeGltfBuffer(bytes(decoded), data.length, 4, encoded, 'ATTRIBUTES');
+
+		assert.equal(encoded[0], 0xa1);
 		assert.deepEqual(decoded, data);
 	},
 };

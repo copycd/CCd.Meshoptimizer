@@ -174,9 +174,9 @@ bool compareMeshNodes(const Mesh& lhs, const Mesh& rhs)
 	return true;
 }
 
-static bool compareTransforms(const Transform& lhs, const Transform& rhs)
+static bool compareInstances(const Instance& lhs, const Instance& rhs)
 {
-	return memcmp(&lhs, &rhs, sizeof(Transform)) == 0;
+	return memcmp(&lhs, &rhs, sizeof(Instance)) == 0;
 }
 
 static bool canMergeMeshNodes(cgltf_node* lhs, cgltf_node* rhs, const Settings& settings)
@@ -223,7 +223,7 @@ static bool canMergeMeshes(const Mesh& lhs, const Mesh& rhs, const Settings& set
 		return false;
 
 	for (size_t i = 0; i < lhs.instances.size(); ++i)
-		if (!compareTransforms(lhs.instances[i], rhs.instances[i]))
+		if (!compareInstances(lhs.instances[i], rhs.instances[i]))
 			return false;
 
 	if (lhs.material != rhs.material)
@@ -769,6 +769,37 @@ static void simplifyAttributes(std::vector<float>& attrs, float* attrw, size_t s
 	}
 }
 
+static void simplifyProtect(std::vector<unsigned char>& locks, Mesh& mesh, size_t presplit_vertices)
+{
+	const Stream* positions = getStream(mesh, cgltf_attribute_type_position);
+	assert(positions);
+
+	size_t vertex_count = positions->data.size();
+
+	locks.resize(vertex_count);
+	unsigned char* data = locks.data();
+
+	std::vector<unsigned int> remap(vertex_count);
+	meshopt_generatePositionRemap(&remap[0], positions->data[0].f, vertex_count, sizeof(Attr));
+
+	// protect UV discontinuities
+	if (Stream* attr = getStream(mesh, cgltf_attribute_type_texcoord))
+	{
+		Attr* a = attr->data.data();
+
+		for (size_t i = 0; i < vertex_count; ++i)
+		{
+			unsigned int r = remap[i];
+
+			if (r != i && (a[i].f[0] != a[r].f[0] || a[i].f[1] != a[r].f[1]))
+				data[i] |= meshopt_SimplifyVertex_Protect;
+		}
+	}
+	// protect all vertices that were artificially split on the UV mirror edges
+	for (size_t i = presplit_vertices; i < vertex_count; ++i)
+		data[i] |= meshopt_SimplifyVertex_Protect;
+}
+
 static void simplifyUvSplit(Mesh& mesh, std::vector<unsigned int>& remap)
 {
 	assert(mesh.type == cgltf_primitive_type_triangles);
@@ -841,7 +872,7 @@ static void simplifyUvSplit(Mesh& mesh, std::vector<unsigned int>& remap)
 	}
 }
 
-static void simplifyMesh(Mesh& mesh, float threshold, float error, bool attributes, bool aggressive, bool lock_borders)
+static void simplifyMesh(Mesh& mesh, float threshold, float error, bool attributes, bool aggressive, bool lock_borders, bool permissive)
 {
 	assert(mesh.type == cgltf_primitive_type_triangles);
 
@@ -852,11 +883,13 @@ static void simplifyMesh(Mesh& mesh, float threshold, float error, bool attribut
 	if (!positions)
 		return;
 
+	size_t presplit_vertices = positions->data.size();
+
 	std::vector<unsigned int> uvremap;
 	if (attributes)
 		simplifyUvSplit(mesh, uvremap);
 
-	size_t vertex_count = mesh.streams[0].data.size();
+	size_t vertex_count = positions->data.size();
 
 	size_t target_index_count = size_t(double(size_t(mesh.indices.size() / 3)) * threshold) * 3;
 	float target_error = error;
@@ -868,23 +901,28 @@ static void simplifyMesh(Mesh& mesh, float threshold, float error, bool attribut
 	else
 		options |= meshopt_SimplifyPrune;
 
+	if (permissive)
+		options |= meshopt_SimplifyPermissive;
+
 	if (mesh.targets || getStream(mesh, cgltf_attribute_type_weights))
 		options |= meshopt_SimplifyRegularize;
 
 	std::vector<unsigned int> indices(mesh.indices.size());
 
+	float attrw[6] = {};
+	std::vector<float> attrs;
 	if (attributes)
-	{
-		float attrw[6] = {};
-		std::vector<float> attrs;
 		simplifyAttributes(attrs, attrw, sizeof(attrw) / sizeof(attrw[0]), mesh);
 
-		indices.resize(meshopt_simplifyWithAttributes(&indices[0], &mesh.indices[0], mesh.indices.size(), positions->data[0].f, vertex_count, sizeof(Attr), attrs.data(), sizeof(attrw), attrw, sizeof(attrw) / sizeof(attrw[0]), NULL, target_index_count, target_error, options));
-	}
+	std::vector<unsigned char> locks;
+	if (attributes && permissive)
+		simplifyProtect(locks, mesh, presplit_vertices);
+
+	if (attributes)
+		indices.resize(meshopt_simplifyWithAttributes(&indices[0], &mesh.indices[0], mesh.indices.size(), positions->data[0].f, vertex_count, sizeof(Attr),
+		    attrs.data(), sizeof(attrw), attrw, sizeof(attrw) / sizeof(attrw[0]), permissive ? locks.data() : NULL, target_index_count, target_error, options));
 	else
-	{
 		indices.resize(meshopt_simplify(&indices[0], &mesh.indices[0], mesh.indices.size(), positions->data[0].f, vertex_count, sizeof(Attr), target_index_count, target_error, options));
-	}
 
 	mesh.indices.swap(indices);
 
@@ -1111,7 +1149,7 @@ void processMesh(Mesh& mesh, const Settings& settings)
 		if (settings.simplify_ratio < 1)
 		{
 			float error = settings.simplify_scaled ? settings.simplify_error / mesh.quality : settings.simplify_error;
-			simplifyMesh(mesh, settings.simplify_ratio, error, settings.simplify_attributes, settings.simplify_aggressive, settings.simplify_lock_borders);
+			simplifyMesh(mesh, settings.simplify_ratio, error, settings.simplify_attributes, settings.simplify_aggressive, settings.simplify_lock_borders, settings.simplify_permissive);
 		}
 
 		optimizeMesh(mesh, settings.compressmore);
@@ -1155,8 +1193,8 @@ void computeMeshQuality(std::vector<Mesh>& meshes)
 			node_maxscale = std::max(node_maxscale, getScale(transform));
 		}
 
-		for (const Transform& xf : mesh.instances)
-			node_maxscale = std::max(node_maxscale, getScale(xf.data));
+		for (const Instance& xf : mesh.instances)
+			node_maxscale = std::max(node_maxscale, getScale(xf.transform));
 
 		scales[i] = node_maxscale == 0.f ? geometry_scale : node_maxscale * geometry_scale;
 		maxscale = std::max(maxscale, scales[i]);
@@ -1166,7 +1204,7 @@ void computeMeshQuality(std::vector<Mesh>& meshes)
 		meshes[i].quality = (scales[i] == 0.f || maxscale == 0.f) ? 1.f : scales[i] / maxscale;
 }
 
-bool hasAlpha(const Mesh& mesh)
+bool hasVertexAlpha(const Mesh& mesh)
 {
 	const Stream* color = getStream(const_cast<Mesh&>(mesh), cgltf_attribute_type_color);
 	if (!color)
@@ -1174,6 +1212,15 @@ bool hasAlpha(const Mesh& mesh)
 
 	for (size_t i = 0; i < color->data.size(); ++i)
 		if (color->data[i].f[3] < 1.f)
+			return true;
+
+	return false;
+}
+
+bool hasInstanceAlpha(const std::vector<Instance>& instances)
+{
+	for (const Instance& instance : instances)
+		if (instance.color[3] < 1.f)
 			return true;
 
 	return false;

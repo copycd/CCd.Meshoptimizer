@@ -29,12 +29,8 @@ $(GLTFPACK_OBJECTS): CXXFLAGS+=-std=c++11
 
 ifdef BASISU
     $(GLTFPACK_OBJECTS): CXXFLAGS+=-DWITH_BASISU
-    $(BUILD)/gltf/basis%.cpp.o: CXXFLAGS+=-I$(BASISU)
-    gltfpack: LDFLAGS+=-lpthread
-
-    ifeq ($(HOSTTYPE),x86_64)
-        $(BUILD)/gltf/basislib.cpp.o: CXXFLAGS+=-msse4.1
-    endif
+    $(BUILD)/gltf/encodebasis.cpp.o: CXXFLAGS+=-I$(BASISU)
+    gltfpack: LDFLAGS+=-lpthread $(BASISU)/libbasisu_encoder.a
 endif
 
 WASI_SDK?=/opt/wasi-sdk
@@ -55,11 +51,11 @@ WASM_DECODER_EXPORTS=meshopt_decodeVertexBuffer meshopt_decodeIndexBuffer meshop
 WASM_ENCODER_SOURCES=src/vertexcodec.cpp src/indexcodec.cpp src/vertexfilter.cpp src/vcacheoptimizer.cpp src/vfetchoptimizer.cpp src/spatialorder.cpp tools/wasmstubs.cpp
 WASM_ENCODER_EXPORTS=meshopt_encodeVertexBuffer meshopt_encodeVertexBufferBound meshopt_encodeVertexBufferLevel meshopt_encodeIndexBuffer meshopt_encodeIndexBufferBound meshopt_encodeIndexSequence meshopt_encodeIndexSequenceBound meshopt_encodeVertexVersion meshopt_encodeIndexVersion meshopt_encodeFilterOct meshopt_encodeFilterQuat meshopt_encodeFilterExp meshopt_encodeFilterColor meshopt_optimizeVertexCache meshopt_optimizeVertexCacheStrip meshopt_optimizeVertexFetchRemap meshopt_spatialSortRemap sbrk __wasm_call_ctors
 
-WASM_SIMPLIFIER_SOURCES=src/simplifier.cpp src/vfetchoptimizer.cpp tools/wasmstubs.cpp
-WASM_SIMPLIFIER_EXPORTS=meshopt_simplify meshopt_simplifyWithAttributes meshopt_simplifyScale meshopt_simplifyPoints meshopt_simplifySloppy meshopt_simplifyPrune meshopt_optimizeVertexFetchRemap sbrk __wasm_call_ctors
+WASM_SIMPLIFIER_SOURCES=src/simplifier.cpp src/vfetchoptimizer.cpp src/indexgenerator.cpp tools/wasmstubs.cpp
+WASM_SIMPLIFIER_EXPORTS=meshopt_simplify meshopt_simplifyWithAttributes meshopt_simplifyWithUpdate meshopt_simplifyScale meshopt_simplifyPoints meshopt_simplifySloppy meshopt_simplifyPrune meshopt_optimizeVertexFetchRemap meshopt_generatePositionRemap sbrk __wasm_call_ctors
 
-WASM_CLUSTERIZER_SOURCES=src/clusterizer.cpp tools/wasmstubs.cpp
-WASM_CLUSTERIZER_EXPORTS=meshopt_buildMeshletsBound meshopt_buildMeshlets meshopt_computeClusterBounds meshopt_computeMeshletBounds meshopt_optimizeMeshlet sbrk __wasm_call_ctors
+WASM_CLUSTERIZER_SOURCES=src/clusterizer.cpp src/meshletutils.cpp tools/wasmstubs.cpp
+WASM_CLUSTERIZER_EXPORTS=meshopt_buildMeshletsBound meshopt_buildMeshletsFlex meshopt_buildMeshletsSpatial meshopt_computeClusterBounds meshopt_computeMeshletBounds meshopt_computeSphereBounds meshopt_optimizeMeshlet sbrk __wasm_call_ctors
 
 ifneq ($(werror),)
 	CFLAGS+=-Werror
@@ -88,6 +84,10 @@ endif
 ifeq ($(config),coverage)
 	CXXFLAGS+=-coverage
 	LDFLAGS+=-coverage
+endif
+
+ifeq ($(config),release-avx)
+	CXXFLAGS+=-O3 -DNDEBUG -mavx
 endif
 
 ifeq ($(config),release-avx512)
@@ -119,6 +119,8 @@ ifeq ($(config),fuzz)
     $(GLTFPACK_OBJECTS): CXXFLAGS+=-DGLTFFUZZ
 endif
 
+-include Makefile.config
+
 all: $(DEMO)
 
 test: $(DEMO)
@@ -139,7 +141,7 @@ format:
 formatjs:
 	prettier -w js/*.js gltf/*.js demo/*.html js/*.ts
 
-js: js/meshopt_decoder.js js/meshopt_decoder.module.js js/meshopt_encoder.js js/meshopt_encoder.module.js js/meshopt_simplifier.js js/meshopt_simplifier.module.js js/meshopt_clusterizer.js js/meshopt_clusterizer.module.js
+js: js/meshopt_decoder.cjs js/meshopt_decoder.mjs js/meshopt_encoder.js js/meshopt_simplifier.js js/meshopt_clusterizer.js
 
 symbols: $(BUILD)/amalgamated.so
 	nm $< -U -g
@@ -183,11 +185,11 @@ build/clusterizer.wasm: $(WASM_CLUSTERIZER_SOURCES)
 	@mkdir -p build
 	$(WASMCC) $^ $(WASM_FLAGS) $(patsubst %,$(WASM_EXPORT_PREFIX)=%,$(WASM_CLUSTERIZER_EXPORTS)) -lc -o $@
 
-js/meshopt_decoder.js: build/decoder_base.wasm build/decoder_simd.wasm tools/wasmpack.py
+js/meshopt_decoder.mjs: build/decoder_base.wasm build/decoder_simd.wasm tools/wasmpack.py
 	sed -i "s#Built with clang.*#Built with $$($(WASMCC) --version | head -n 1 | sed 's/\s\+(.*//')#" $@
 	sed -i "s#Built from meshoptimizer .*#Built from meshoptimizer $$(cat src/meshoptimizer.h | grep -Po '(?<=version )[0-9.]+')#" $@
-	sed -i "s#\([\"']\).*\(;\s*//\s*embed! base\)#\\1$$(cat build/decoder_base.wasm | python3 tools/wasmpack.py)\\1\\2#" $@
-	sed -i "s#\([\"']\).*\(;\s*//\s*embed! simd\)#\\1$$(cat build/decoder_simd.wasm | python3 tools/wasmpack.py)\\1\\2#" $@
+	python3 tools/wasmpack.py patch $@ base <build/decoder_base.wasm
+	python3 tools/wasmpack.py patch $@ simd <build/decoder_simd.wasm
 
 js/meshopt_encoder.js: build/encoder.wasm tools/wasmpack.py
 js/meshopt_simplifier.js: build/simplifier.wasm tools/wasmpack.py
@@ -196,12 +198,14 @@ js/meshopt_clusterizer.js: build/clusterizer.wasm tools/wasmpack.py
 js/meshopt_encoder.js js/meshopt_simplifier.js js/meshopt_clusterizer.js:
 	sed -i "s#Built with clang.*#Built with $$($(WASMCC) --version | head -n 1 | sed 's/\s\+(.*//')#" $@
 	sed -i "s#Built from meshoptimizer .*#Built from meshoptimizer $$(cat src/meshoptimizer.h | grep -Po '(?<=version )[0-9.]+')#" $@
-	sed -i "s#\([\"']\).*\(;\s*//\s*embed! wasm\)#\\1$$(cat $< | python3 tools/wasmpack.py)\\1\\2#" $@
+	python3 tools/wasmpack.py patch $@ wasm <$<
 
-js/%.module.js: js/%.js
-	sed '\#// export!#q' <$< >$@
-	sed -i "/use strict.;/d" $@
-	sed -i "s#// export! \(.*\)#export { \\1 };#" $@
+js/meshopt_decoder.cjs: js/meshopt_decoder.mjs
+	sed '/export {/d' <$< >$@
+	echo "if (typeof exports === 'object' && typeof module === 'object') module.exports = MeshoptDecoder;" >>$@
+	echo "else if (typeof define === 'function' && define['amd']) define([], function () { return MeshoptDecoder; });" >>$@
+	echo "else if (typeof exports === 'object') exports['MeshoptDecoder'] = MeshoptDecoder;" >>$@
+	echo "else (typeof self !== 'undefined' ? self : this).MeshoptDecoder = MeshoptDecoder;" >>$@
 
 $(DEMO): $(DEMO_OBJECTS) $(LIBRARY)
 	$(CXX) $^ $(LDFLAGS) -o $@
@@ -227,10 +231,10 @@ codecbench-simd.wasm: tools/codecbench.cpp $(LIBRARY_SOURCES)
 codectest: tools/codectest.cpp $(LIBRARY)
 	$(CXX) $^ $(CXXFLAGS) $(LDFLAGS) -o $@
 
-codecfuzz: tools/codecfuzz.cpp src/vertexcodec.cpp src/indexcodec.cpp
+codecfuzz: tools/codecfuzz.cpp src/vertexcodec.cpp src/indexcodec.cpp src/meshletcodec.cpp
 	$(CXX) $^ -fsanitize=fuzzer,address,undefined -O1 -g -o $@
 
-clusterfuzz: tools/clusterfuzz.cpp src/clusterizer.cpp
+clusterfuzz: tools/clusterfuzz.cpp src/clusterizer.cpp src/partition.cpp
 	$(CXX) $^ -fsanitize=fuzzer,address,undefined -O1 -g -o $@
 
 simplifyfuzz: tools/simplifyfuzz.cpp src/simplifier.cpp
