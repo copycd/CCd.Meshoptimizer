@@ -23,6 +23,7 @@ struct Texture
 	const unsigned char* data;
 	size_t stride, pitch;
 	unsigned int width, height;
+	float widthf, heightf; // width * 256.f, height * 256.f
 };
 
 static float sampleTexture(const Texture& texture, float u, float v)
@@ -31,19 +32,19 @@ static float sampleTexture(const Texture& texture, float u, float v)
 	u = fabsf(u - 0.5f) > 0.5f ? u - floorf(u) : u;
 	v = fabsf(v - 0.5f) > 0.5f ? v - floorf(v) : v;
 
-	// convert from [0, 1] to pixel grid and shift so that texel centers are on an integer grid
-	u = u * float(int(texture.width)) - 0.5f;
-	v = v * float(int(texture.height)) - 0.5f;
+	// convert from [0, 1] to 16.8 fixed point coordinates (rounded to nearest subpixel) with texel centers on integer grid
+	int uf = int(u * texture.widthf - 127.5f);
+	int vf = int(v * texture.heightf - 127.5f);
 
-	// clamp u/v along the left/top edge to avoid extrapolation since we don't interpolate across the edge
-	u = u < 0 ? 0.f : u;
-	v = v < 0 ? 0.f : v;
+	// clamp to avoid extrapolation past left/top edge since we don't wrap across the edge
+	uf = uf < 0 ? 0 : uf;
+	vf = vf < 0 ? 0 : vf;
 
-	// note: u/v is now in [0, size-0.5]; float->int->float is usually less expensive than floor
-	int x = int(u);
-	int y = int(v);
-	float rx = u - float(x);
-	float ry = v - float(y);
+	// x/y are texel coordinates, rx/ry are subpixel offsets
+	int x = uf >> 8;
+	int y = vf >> 8;
+	int rx = uf & 255;
+	int ry = vf & 255;
 
 	// safeguard: this should not happen but if it ever does, ensure the accesses are inbounds
 	if (unsigned(x) >= texture.width || unsigned(y) >= texture.height)
@@ -59,10 +60,12 @@ static float sampleTexture(const Texture& texture, float u, float v)
 	unsigned char a01 = texture.data[offset + offsety];
 	unsigned char a11 = texture.data[offset + offsetx + offsety];
 
-	// bilinear interpolation; we do it partially in integer space, deferring full conversion to [0, 1] until the end
-	float ax0 = float(a00) + float(a10 - a00) * rx;
-	float ax1 = float(a01) + float(a11 - a01) * rx;
-	return (ax0 + (ax1 - ax0) * ry) * (1.f / 255.f);
+	// bilinear interpolation in integer space: result is 8.16 fixed point
+	int ax0 = a00 * 256 + (a10 - a00) * rx;
+	int ax1 = a01 * 256 + (a11 - a01) * rx;
+	int axy = ax0 * 256 + (ax1 - ax0) * ry;
+
+	return float(axy) * (1.f / (255.f * 65536.f));
 }
 
 static unsigned int hashUpdate4u(unsigned int h, const unsigned char* key, size_t len)
@@ -120,7 +123,7 @@ struct OMMHasher
 {
 	const unsigned char* data;
 	const unsigned int* offsets;
-	const int* levels;
+	const unsigned char* levels;
 	int states;
 
 	size_t hash(unsigned int index) const
@@ -192,57 +195,157 @@ inline int quantizeSubpixel(float v, unsigned int size)
 	return int(v * float(int(size) * 4) + (v >= 0 ? 0.5f : -0.5f));
 }
 
-static void rasterizeOpacity2(unsigned char* result, size_t index, float a0, float a1, float a2, float ac)
+static int rasterizeEdge(float u0, float v0, float u1, float v1, int edgeres, const Texture& texture)
 {
+	float edgestep = 1.f / float(edgeres + 1);
+
+	float ud = (u1 - u0) * edgestep, vd = (v1 - v0) * edgestep;
+	float u = u0, v = v0;
+
+	int mask = 0;
+	int count = 0;
+
+	for (int i = 0; i < edgeres; ++i)
+	{
+		u += ud;
+		v += vd;
+
+		float a = sampleTexture(texture, u, v);
+		mask |= (a >= 0.5f) << i;
+		count += a >= 0.5f;
+	}
+
+	return mask | (count << 16);
+}
+
+template <int States>
+static void rasterizeOpacity0(unsigned char* result, size_t index, float a0, float a1, float a2, float ac, int e0, int e1, int e2, int edgeres)
+{
+	int states = States;
+
 	// basic coverage estimator from center and corner values; trained to minimize error
 	float coverage = (a0 + a1 + a2) * 0.12f + ac * 0.64f;
 
-	result[index / 8] |= (coverage >= 0.5f) << (index % 8);
-}
+	if (edgeres)
+	{
+		float edgescale = 1.f / edgeres;
 
-static void rasterizeOpacity4(unsigned char* result, size_t index, float a0, float a1, float a2, float ac)
-{
-	int transp = (a0 < 0.25f) & (a1 < 0.25f) & (a2 < 0.25f) & (ac < 0.25f);
-	int opaque = (a0 > 0.75f) & (a1 > 0.75f) & (a2 > 0.75f) & (ac > 0.75f);
-	float coverage = (a0 + a1 + a2) * 0.12f + ac * 0.64f;
+		// if we have edge samples, we can get a better coverage estimate by including them; trained to minimize error
+		coverage = ac * 0.22f + float((e0 >> 16) + (e1 >> 16) + (e2 >> 16)) * edgescale * 0.23f + (a0 + a1 + a2) * 0.03f;
+	}
+
+	if (states == 2)
+	{
+		result[index / 8] |= (coverage >= 0.5f) << (index % 8);
+		return;
+	}
+
+	int transp = (a0 < 0.5f) & (a1 < 0.5f) & (a2 < 0.5f) & (ac < 0.5f);
+	int opaque = (a0 > 0.5f) & (a1 > 0.5f) & (a2 > 0.5f) & (ac > 0.5f);
 
 	// treat state as known if thresholding of corners & centers against wider bounds is consistent
 	// for unknown states, we currently use the same formula as the 2-state opacity for better consistency with forced 2-state
-	int state = (transp | opaque) ? opaque : (2 + (coverage >= 0.5f));
+	int unknown = 2 + (coverage >= 0.5f);
+	int state = (transp | opaque) ? opaque : unknown;
+
+	if (edgeres && (transp | opaque))
+	{
+		// if we have edge samples, ensure they are consistent too, falling back to unknown if not
+		int exp = opaque ? (1 << edgeres) - 1 : 0;
+		int eok = ((e0 & 0xffff) == exp) & ((e1 & 0xffff) == exp) & ((e2 & 0xffff) == exp);
+
+		state = eok ? state : unknown;
+	}
 
 	result[index / 4] |= state << ((index % 4) * 2);
 }
 
 template <int States>
-static void rasterizeOpacityRec(unsigned char* result, size_t index, int level, const float* c0, const float* c1, const float* c2, const Texture& texture)
+static void rasterizeOpacity1(unsigned char* result, size_t index, int edgeres, const float* c0, const float* c1, const float* c2, const Texture& texture)
+{
+	// compute each edge midpoint & sample
+	float c01[3] = {(c0[0] + c1[0]) / 2, (c0[1] + c1[1]) / 2, 0.f};
+	float c12[3] = {(c1[0] + c2[0]) / 2, (c1[1] + c2[1]) / 2, 0.f};
+	float c20[3] = {(c2[0] + c0[0]) / 2, (c2[1] + c0[1]) / 2, 0.f};
+
+	c01[2] = sampleTexture(texture, c01[0], c01[1]);
+	c12[2] = sampleTexture(texture, c12[0], c12[1]);
+	c20[2] = sampleTexture(texture, c20[0], c20[1]);
+
+	// corner tables for each edge, and corner + edge tables for each triangle
+	// edges are numbered counter clockwise, 6 outer first, 3 inner last; triangle vertex and edge references are in triangle winding order
+	static const unsigned char edges[9][2] = {{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 0}, {5, 1}, {1, 3}, {3, 5}};
+	static const unsigned char triangles[4][6] = {{0, 1, 5, 0, 6, 5}, {5, 3, 1, 8, 7, 6}, {1, 2, 3, 1, 2, 7}, {3, 5, 4, 8, 4, 3}};
+
+	const float* points[] = {c0, c01, c1, c12, c2, c20};
+
+	int em[9] = {};
+
+	// sample additional points on the edges to improve state estimation
+	if (edgeres > 0)
+		for (size_t i = 0; i < 9; ++i)
+			em[i] = rasterizeEdge(points[edges[i][0]][0], points[edges[i][0]][1], points[edges[i][1]][0], points[edges[i][1]][1], edgeres, texture);
+
+	for (size_t i = 0; i < 4; ++i)
+	{
+		const unsigned char* tri = triangles[i];
+		const float* p0 = points[tri[0]];
+		const float* p1 = points[tri[1]];
+		const float* p2 = points[tri[2]];
+
+		// compute triangle center & sample
+		float uc = (p0[0] + p1[0] + p2[0]) * (1.f / 3.f);
+		float vc = (p0[1] + p1[1] + p2[1]) * (1.f / 3.f);
+		float ac = sampleTexture(texture, uc, vc);
+
+		// rasterize opacity state based on alpha values in corners and center (and optionally edges)
+		rasterizeOpacity0<States>(result, index * 4 + i, p0[2], p1[2], p2[2], ac, em[tri[3]], em[tri[4]], em[tri[5]], edgeres);
+	}
+}
+
+template <int States>
+static void rasterizeOpacityRec(unsigned char* result, size_t index, int level, int edgeres, const float* c0, const float* c1, const float* c2, const Texture& texture)
 {
 	if (level == 0)
 	{
 		// compute triangle center & sample
-		float uc = (c0[0] + c1[0] + c2[0]) / 3;
-		float vc = (c0[1] + c1[1] + c2[1]) / 3;
+		float uc = (c0[0] + c1[0] + c2[0]) * (1.f / 3.f);
+		float vc = (c0[1] + c1[1] + c2[1]) * (1.f / 3.f);
 		float ac = sampleTexture(texture, uc, vc);
 
-		// rasterize opacity state based on alpha values in corners and center
-		(States == 2) ? rasterizeOpacity2(result, index, c0[2], c1[2], c2[2], ac) : rasterizeOpacity4(result, index, c0[2], c1[2], c2[2], ac);
-		return;
+		int e0 = 0, e1 = 0, e2 = 0;
+
+		if (edgeres > 0)
+		{
+			// sample additional points on the edges to improve state estimation
+			e0 = rasterizeEdge(c0[0], c0[1], c1[0], c1[1], edgeres, texture);
+			e1 = rasterizeEdge(c1[0], c1[1], c2[0], c2[1], edgeres, texture);
+			e2 = rasterizeEdge(c2[0], c2[1], c0[0], c0[1], edgeres, texture);
+		}
+
+		// rasterize opacity state based on alpha values in corners and center (and optionally edges)
+		return rasterizeOpacity0<States>(result, index, c0[2], c1[2], c2[2], ac, e0, e1, e2, edgeres);
 	}
+
+	// fast path: equivalent to recursive rasterization, but reuses edge data to reduce sample count
+	if (level == 1 && edgeres > 0)
+		return rasterizeOpacity1<States>(result, index, edgeres, c0, c1, c2, texture);
 
 	// compute each edge midpoint & sample
 	float c01[3] = {(c0[0] + c1[0]) / 2, (c0[1] + c1[1]) / 2, 0.f};
 	float c12[3] = {(c1[0] + c2[0]) / 2, (c1[1] + c2[1]) / 2, 0.f};
-	float c02[3] = {(c0[0] + c2[0]) / 2, (c0[1] + c2[1]) / 2, 0.f};
+	float c20[3] = {(c2[0] + c0[0]) / 2, (c2[1] + c0[1]) / 2, 0.f};
 
 	c01[2] = sampleTexture(texture, c01[0], c01[1]);
 	c12[2] = sampleTexture(texture, c12[0], c12[1]);
-	c02[2] = sampleTexture(texture, c02[0], c02[1]);
+	c20[2] = sampleTexture(texture, c20[0], c20[1]);
 
 	// recursively rasterize each triangle
 	// note: triangles 1 and 3 have flipped winding, and 1 is flipped upside down
-	rasterizeOpacityRec<States>(result, index * 4 + 0, level - 1, c0, c01, c02, texture);
-	rasterizeOpacityRec<States>(result, index * 4 + 1, level - 1, c02, c12, c01, texture);
-	rasterizeOpacityRec<States>(result, index * 4 + 2, level - 1, c01, c1, c12, texture);
-	rasterizeOpacityRec<States>(result, index * 4 + 3, level - 1, c12, c02, c2, texture);
+	rasterizeOpacityRec<States>(result, index * 4 + 0, level - 1, edgeres, c0, c01, c20, texture);
+	rasterizeOpacityRec<States>(result, index * 4 + 1, level - 1, edgeres, c20, c12, c01, texture);
+	rasterizeOpacityRec<States>(result, index * 4 + 2, level - 1, edgeres, c01, c1, c12, texture);
+	rasterizeOpacityRec<States>(result, index * 4 + 3, level - 1, edgeres, c12, c20, c2, texture);
 }
 
 static int getSpecialIndex(const unsigned char* data, int level, int states)
@@ -271,7 +374,7 @@ static int getSpecialIndex(const unsigned char* data, int level, int states)
 
 } // namespace meshopt
 
-size_t meshopt_opacityMapMeasure(int* levels, unsigned int* sources, int* omm_indices, const unsigned int* indices, size_t index_count, const float* vertex_uvs, size_t vertex_count, size_t vertex_uvs_stride, unsigned int texture_width, unsigned int texture_height, int max_level, float target_edge)
+size_t meshopt_opacityMapMeasure(unsigned char* levels, unsigned int* sources, int* omm_indices, const unsigned int* indices, size_t index_count, const float* vertex_uvs, size_t vertex_count, size_t vertex_uvs_stride, unsigned int texture_width, unsigned int texture_height, int max_level, float target_edge)
 {
 	using namespace meshopt;
 
@@ -279,7 +382,7 @@ size_t meshopt_opacityMapMeasure(int* levels, unsigned int* sources, int* omm_in
 	assert(vertex_uvs_stride >= 8 && vertex_uvs_stride <= 256);
 	assert(vertex_uvs_stride % sizeof(float) == 0);
 	assert(unsigned(texture_width - 1) < 16384 && unsigned(texture_height - 1) < 16384);
-	assert(max_level > 0 && max_level <= 12);
+	assert(max_level >= 0 && max_level <= 12);
 	assert(target_edge >= 0);
 
 	(void)vertex_count;
@@ -336,7 +439,7 @@ size_t meshopt_opacityMapMeasure(int* levels, unsigned int* sources, int* omm_in
 		if (*entry == ~0u)
 		{
 			*entry = unsigned(result);
-			levels[result] = level;
+			levels[result] = (unsigned char)level;
 			sources[result] = unsigned(i / 3);
 			result++;
 		}
@@ -355,30 +458,6 @@ size_t meshopt_opacityMapEntrySize(int level, int states)
 	return meshopt::getLevelSize(level, states);
 }
 
-int meshopt_opacityMapPreferredMip(int level, const float* uv0, const float* uv1, const float* uv2, unsigned int texture_width, unsigned int texture_height)
-{
-	assert(level >= 0 && level <= 12);
-	assert(unsigned(texture_width - 1) < 16384 && unsigned(texture_height - 1) < 16384);
-
-	float texture_area = float(texture_width) * float(texture_height);
-
-	// compute log2 of edge length (in texels)
-	float uvarea = fabsf((uv1[0] - uv0[0]) * (uv2[1] - uv0[1]) - (uv2[0] - uv0[0]) * (uv1[1] - uv0[1])) * 0.5f * texture_area;
-	float ratio = sqrtf(uvarea) / float(1 << level);
-	float levelf = log2f(ratio > 1 ? ratio : 1);
-
-	// round down and clamp
-	int mip = int(levelf - 0.5f);
-	mip = mip < 0 ? 0 : mip;
-	mip = mip < 16 ? mip : 16;
-
-	// ensure the selected mip is in range
-	while (mip > 0 && (texture_width >> mip) == 0 && (texture_height >> mip) == 0)
-		mip--;
-
-	return mip;
-}
-
 void meshopt_opacityMapRasterize(unsigned char* result, int level, int states, const float* uv0, const float* uv1, const float* uv2, const unsigned char* texture_data, size_t texture_stride, size_t texture_pitch, unsigned int texture_width, unsigned int texture_height)
 {
 	using namespace meshopt;
@@ -391,17 +470,27 @@ void meshopt_opacityMapRasterize(unsigned char* result, int level, int states, c
 
 	memset(result, 0, getLevelSize(level, states));
 
-	Texture texture = {texture_data, texture_stride, texture_pitch, texture_width, texture_height};
+	Texture texture = {texture_data, texture_stride, texture_pitch, texture_width, texture_height, float(int(texture_width)) * 256.f, float(int(texture_height)) * 256.f};
+
+	// determine number of edge samples for conservative state estimation
+	float texture_area = float(int(texture_width)) * float(int(texture_height));
+	float uvarea = fabsf((uv1[0] - uv0[0]) * (uv2[1] - uv0[1]) - (uv2[0] - uv0[0]) * (uv1[1] - uv0[1])) * 0.5f * texture_area;
+	float uvedge = sqrtf(uvarea) / float(1 << level);
+
+	// target ~2px distance between edge samples (assuming equilateral microtriangles)
+	int edgeres = int(uvedge * 0.75f);
+	edgeres = edgeres < 0 ? 0 : edgeres;
+	edgeres = edgeres > 7 ? 7 : edgeres;
 
 	// rasterize all micro triangles recursively, passing corner data down to reduce redundant sampling
 	float c0[3] = {uv0[0], uv0[1], sampleTexture(texture, uv0[0], uv0[1])};
 	float c1[3] = {uv1[0], uv1[1], sampleTexture(texture, uv1[0], uv1[1])};
 	float c2[3] = {uv2[0], uv2[1], sampleTexture(texture, uv2[0], uv2[1])};
 
-	(states == 2 ? rasterizeOpacityRec<2> : rasterizeOpacityRec<4>)(result, 0, level, c0, c1, c2, texture);
+	(states == 2 ? rasterizeOpacityRec<2> : rasterizeOpacityRec<4>)(result, 0, level, edgeres, c0, c1, c2, texture);
 }
 
-size_t meshopt_opacityMapCompact(unsigned char* data, size_t data_size, int* levels, unsigned int* offsets, size_t omm_count, int* omm_indices, size_t triangle_count, int states)
+size_t meshopt_opacityMapCompact(unsigned char* data, size_t data_size, unsigned char* levels, unsigned int* offsets, size_t omm_count, int* omm_indices, size_t triangle_count, int states)
 {
 	using namespace meshopt;
 
@@ -443,7 +532,7 @@ size_t meshopt_opacityMapCompact(unsigned char* data, size_t data_size, int* lev
 		// speculatively write data to give hasher a way to compare it
 		memcpy(data + offset, old, size);
 		offsets[next] = unsigned(offset);
-		levels[next] = level;
+		levels[next] = (unsigned char)level;
 
 		unsigned int* entry = hashLookup3(table, table_size, hasher, unsigned(next), ~0u);
 
@@ -460,8 +549,8 @@ size_t meshopt_opacityMapCompact(unsigned char* data, size_t data_size, int* lev
 	// remap triangle indices to new indices or special indices
 	for (size_t i = 0; i < triangle_count; ++i)
 	{
-		assert(unsigned(omm_indices[i]) < omm_count);
-		omm_indices[i] = remap[omm_indices[i]];
+		assert(omm_indices[i] < 0 || unsigned(omm_indices[i]) < omm_count);
+		omm_indices[i] = omm_indices[i] < 0 ? omm_indices[i] : remap[omm_indices[i]];
 	}
 
 	return next;

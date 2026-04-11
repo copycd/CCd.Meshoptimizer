@@ -13,7 +13,7 @@
 #endif
 
 // MSVC supports compiling SSE4.1 code regardless of compile options; we use a cpuid-based scalar fallback
-#if !defined(SIMD_SSE) && defined(_MSC_VER) && !defined(__clang__) && (defined(_M_IX86) || defined(_M_X64))
+#if !defined(SIMD_SSE) && defined(_MSC_VER) && !defined(__clang__) && (defined(_M_IX86) || (defined(_M_X64) && !defined(_M_ARM64EC)))
 #define SIMD_SSE
 #define SIMD_FALLBACK
 #endif
@@ -26,11 +26,11 @@
 #endif
 
 // When targeting AArch64, enable NEON SIMD unconditionally; we do not support SIMD decoding for 32-bit ARM
-#if defined(__aarch64__) || (defined(_MSC_VER) && defined(_M_ARM64) && _MSC_VER >= 1922)
+#if defined(__aarch64__) || (defined(_MSC_VER) && (defined(_M_ARM64) || defined(_M_ARM64EC)) && _MSC_VER >= 1922)
 #define SIMD_NEON
 #endif
 
-#if defined(_MSC_VER) && _MSC_VER > 1930
+#if defined(_MSC_VER) && !defined(__clang__) && _MSC_VER > 1930
 #define SIMD_FLATTEN [[msvc::flatten]]
 #elif defined(__GNUC__) || defined(__clang__)
 #define SIMD_FLATTEN __attribute__((flatten))

@@ -1,5 +1,5 @@
 /**
- * meshoptimizer - version 1.0
+ * meshoptimizer - version 1.1
  *
  * Copyright (C) 2016-2026, by Arseny Kapoulkine (arseny.kapoulkine@gmail.com)
  * Report bugs and download new versions at https://github.com/zeux/meshoptimizer
@@ -12,7 +12,7 @@
 #include <stddef.h>
 
 /* Version macro; major * 1000 + minor * 10 + patch */
-#define MESHOPTIMIZER_VERSION 1000 /* 1.0 */
+#define MESHOPTIMIZER_VERSION 1010 /* 1.1 */
 
 /* If no API is defined, assume default */
 #ifndef MESHOPTIMIZER_API
@@ -300,7 +300,7 @@ MESHOPTIMIZER_API int meshopt_decodeIndexSequence(void* destination, size_t inde
  * Encodes meshlet data into an array of bytes that is generally smaller and compresses better compared to original.
  * Returns encoded data size on success, 0 on error; the only error condition is if buffer doesn't have enough space
  * This function encodes a single meshlet; when encoding multiple meshlets, additional headers may be necessary to store vertex/triangle count and encoded size.
- * For maximum efficiency the meshlet being encoded should be optimized using meshopt_optimizeMeshlet; additionally, vertex reference data should be optimized for locality (fetch).
+ * For maximum efficiency the meshlet being encoded should be optimized using meshopt_optimizeMeshletLevel with level 1+ (3 recommended); additionally, vertex reference data should be optimized for locality (fetch).
  *
  * buffer must contain enough space for the encoded meshlet (use meshopt_encodeMeshletBound to compute worst case size)
  * vertices may be NULL, in which case vertex_count must be 0 and only triangle data is encoded
@@ -454,10 +454,12 @@ enum
 	meshopt_SimplifyRegularize = 1 << 4,
 	/* Experimental: Allow collapses across attribute discontinuities, except for vertices that are tagged with meshopt_SimplifyVertex_Protect in vertex_lock. */
 	meshopt_SimplifyPermissive = 1 << 5,
+	/* Experimental: Produce more regular triangle sizes and shapes during simplification, at a small cost to geometric and attribute quality. */
+	meshopt_SimplifyRegularizeLight = 1 << 6,
 };
 
 /**
- * Experimental: Simplification vertex flags/locks, for use in `vertex_lock` arrays in simplification APIs
+ * Simplification vertex flags/locks, for use in `vertex_lock` arrays in simplification APIs
  */
 enum
 {
@@ -465,6 +467,8 @@ enum
 	meshopt_SimplifyVertex_Lock = 1 << 0,
 	/* Protect attribute discontinuity at this vertex; must be used together with meshopt_SimplifyPermissive option. */
 	meshopt_SimplifyVertex_Protect = 1 << 1,
+	/* Experimental: Increase priority for this vertex, making it more likely that it's preserved during simplification. */
+	meshopt_SimplifyVertex_Priority = 1 << 2,
 };
 
 /**
@@ -502,7 +506,7 @@ MESHOPTIMIZER_API size_t meshopt_simplify(unsigned int* destination, const unsig
  * vertex_attributes should have attribute_count floats for each vertex
  * attribute_weights should have attribute_count floats in total; the weights determine relative priority of attributes between each other and wrt position
  * attribute_count must be <= 32
- * vertex_lock can be NULL; when it's not NULL, it should have a value for each vertex; 1 denotes vertices that can't be moved
+ * vertex_lock can be NULL; when it's not NULL, it should have a value for each vertex composed of meshopt_SimplifyVertex_* flags
  * target_error represents the error relative to mesh extents that can be tolerated, e.g. 0.01 = 1% deformation; value range [0..1]
  * options must be a bitmask composed of meshopt_SimplifyX options; 0 is a safe default
  * result_error can be NULL; when it's not NULL, it will contain the resulting (relative) error after simplification
@@ -525,7 +529,7 @@ MESHOPTIMIZER_API size_t meshopt_simplifyWithAttributes(unsigned int* destinatio
  * vertex_attributes should have attribute_count floats for each vertex
  * attribute_weights should have attribute_count floats in total; the weights determine relative priority of attributes between each other and wrt position
  * attribute_count must be <= 32
- * vertex_lock can be NULL; when it's not NULL, it should have a value for each vertex; 1 denotes vertices that can't be moved
+ * vertex_lock can be NULL; when it's not NULL, it should have a value for each vertex composed of meshopt_SimplifyVertex_* flags
  * target_error represents the error relative to mesh extents that can be tolerated, e.g. 0.01 = 1% deformation; value range [0..1]
  * options must be a bitmask composed of meshopt_SimplifyX options; 0 is a safe default
  * result_error can be NULL; when it's not NULL, it will contain the resulting (relative) error after simplification
@@ -738,6 +742,15 @@ MESHOPTIMIZER_API size_t meshopt_buildMeshletsSpatial(struct meshopt_Meshlet* me
  */
 MESHOPTIMIZER_API void meshopt_optimizeMeshlet(unsigned int* meshlet_vertices, unsigned char* meshlet_triangles, size_t triangle_count, size_t vertex_count);
 
+/**
+ * Experimental: Meshlet optimizer
+ * Reorders meshlet vertices and triangles to maximize locality, with higher levels resulting in smaller compressed size at the cost of optimization time.
+ * At level 0 the result is equivalent to meshopt_optimizeMeshlet; levels >= 1 may rotate triangle corners to improve compression (which can change provoking vertex and affect OMM data).
+ *
+ * level should be in the range [0, 9] with 0 equivalent to meshopt_optimizeMeshlet and 9 being the slowest; the sweet spot for compression ratio is around 3
+ */
+MESHOPTIMIZER_EXPERIMENTAL void meshopt_optimizeMeshletLevel(unsigned int* meshlet_vertices, size_t vertex_count, unsigned char* meshlet_triangles, size_t triangle_count, int level);
+
 struct meshopt_Bounds
 {
 	/* bounding sphere, useful for frustum and occlusion culling */
@@ -843,13 +856,47 @@ MESHOPTIMIZER_API void meshopt_spatialSortTriangles(unsigned int* destination, c
 MESHOPTIMIZER_API void meshopt_spatialClusterPoints(unsigned int* destination, const float* vertex_positions, size_t vertex_count, size_t vertex_positions_stride, size_t cluster_size);
 
 /**
- * Experimental: Opacity micromap generator
+ * Experimental: Opacity micromap generator (measure)
+ * Computes a subdivision level for each input triangle, as well as deduplicating the triangles that reference the same UVs to reduce rasterization requests.
+ * Returns the number of OMM entries.
+ *
+ * levels and sources must contain enough space for the worst case output (index_count/3 elements, one per resulting OMM entry)
+ * levels[i] will contain the subdivision level for entry i, with the total number of entries returned by the function; each entry should be rasterized from triangle index sources[i]
+ * omm_indices must contain enough space for the resulting OMM indices (index_count/3 elements, one per triangle)
+ * vertex_uvs should have float2 texture coordinate in the first 8 bytes of each vertex
+ * max_level specifies the maximum subdivision level (0..12)
+ * target_edge can be 0; when >0, triangle subdivision is adaptive and targets target_edge^2 texel area
  */
-MESHOPTIMIZER_EXPERIMENTAL size_t meshopt_opacityMapMeasure(int* levels, unsigned int* sources, int* omm_indices, const unsigned int* indices, size_t index_count, const float* vertex_uvs, size_t vertex_count, size_t vertex_uvs_stride, unsigned int texture_width, unsigned int texture_height, int max_level, float target_edge);
+MESHOPTIMIZER_EXPERIMENTAL size_t meshopt_opacityMapMeasure(unsigned char* levels, unsigned int* sources, int* omm_indices, const unsigned int* indices, size_t index_count, const float* vertex_uvs, size_t vertex_count, size_t vertex_uvs_stride, unsigned int texture_width, unsigned int texture_height, int max_level, float target_edge);
+
+/**
+ * Experimental: Opacity micromap generator (rasterize)
+ * Rasterizes opacity state for a single triangle entry by sampling the alpha texture, using bilinear filtering and 0.5 alpha cutoff.
+ *
+ * result should contain enough space for the output opacity data (which can be computed using meshopt_opacityMapEntrySize)
+ * level specifies the subdivision level (0..12)
+ * states should be 2 for 2-state format (opaque/transparent) and 4 for 4-state format (opaque/transparent/unknown)
+ * uv0/uv1/uv2 should refer to a float2 texture coordinate for each triangle corner; note that micromap data is sensitive to the corner order
+ * texture_data should point to the alpha channel of the first pixel, encoded as UNORM8
+ * texture_stride specifies the distance in bytes between consecutive pixels, e.g. 4 for RGBA input
+ * texture_pitch specifies the distance in bytes between consecutive rows, e.g. 4*texture_width for tightly packed RGBA input
+ */
 MESHOPTIMIZER_EXPERIMENTAL void meshopt_opacityMapRasterize(unsigned char* result, int level, int states, const float* uv0, const float* uv1, const float* uv2, const unsigned char* texture_data, size_t texture_stride, size_t texture_pitch, unsigned int texture_width, unsigned int texture_height);
-MESHOPTIMIZER_EXPERIMENTAL size_t meshopt_opacityMapCompact(unsigned char* data, size_t data_size, int* levels, unsigned int* offsets, size_t omm_count, int* omm_indices, size_t triangle_count, int states);
-MESHOPTIMIZER_EXPERIMENTAL int meshopt_opacityMapPreferredMip(int level, const float* uv0, const float* uv1, const float* uv2, unsigned int texture_width, unsigned int texture_height);
 MESHOPTIMIZER_EXPERIMENTAL size_t meshopt_opacityMapEntrySize(int level, int states);
+
+/**
+ * Experimental: Opacity micromap generator (compact)
+ * Compacts and deduplicates opacity data, merging identical micromap entries and replacing micromap states with special indices (-4..-1) when possible.
+ * Returns the number of OMM entries after compaction; the data array should be trimmed using the last offset/size.
+ *
+ * data should contain opacity data for all input/output entries
+ * levels should contain subdivision levels for all input/output entries
+ * offsets should contain offset into data[] for each entry
+ * levels[i] and offsets[i] will be updated with post-compaction level/offset for entry i, with the total number of entries returned by the function
+ * omm_indices should contain indices into the original OMM data, and will be updated with a new index or a special index (-4..-1) when possible
+ * states should be 2 for 2-state format (opaque/transparent) and 4 for 4-state format (opaque/transparent/unknown)
+ */
+MESHOPTIMIZER_EXPERIMENTAL size_t meshopt_opacityMapCompact(unsigned char* data, size_t data_size, unsigned char* levels, unsigned int* offsets, size_t omm_count, int* omm_indices, size_t triangle_count, int states);
 
 /**
  * Quantize a float into half-precision (as defined by IEEE-754 fp16) floating point value

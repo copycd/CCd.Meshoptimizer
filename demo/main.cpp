@@ -788,7 +788,7 @@ static void validateDecodeMeshlet(const unsigned char* data, size_t size, const 
 	}
 }
 
-void encodeMeshlets(const Mesh& mesh, size_t max_vertices, size_t max_triangles, bool reorder = true)
+void encodeMeshlets(const Mesh& mesh, size_t max_vertices, size_t max_triangles, bool reorder = true, int level = 3)
 {
 	size_t max_meshlets = meshopt_buildMeshletsBound(mesh.indices.size(), max_vertices, max_triangles);
 	std::vector<meshopt_Meshlet> meshlets(max_meshlets);
@@ -804,16 +804,13 @@ void encodeMeshlets(const Mesh& mesh, size_t max_vertices, size_t max_triangles,
 		// this is an example of how to trim the vertex/triangle arrays when copying data out to GPU storage
 		meshlet_vertices.resize(last.vertex_offset + last.vertex_count);
 		meshlet_triangles.resize(last.triangle_offset + last.triangle_count * 3);
-
-		// TODO: over-allocate meshlet_vertices to multiple of 3 to make meshopt_optimizeVertexFetch below work without assertions
-		meshlet_vertices.resize((meshlet_vertices.size() + 2) / 3 * 3);
 	}
 
 	std::vector<unsigned char> cbuf(meshopt_encodeMeshletBound(max_vertices, max_triangles));
 
 	// optimize each meshlet for locality; this is important for performance, and critical for good compression
 	for (size_t i = 0; i < meshlets.size(); ++i)
-		meshopt_optimizeMeshlet(&meshlet_vertices[meshlets[i].vertex_offset], &meshlet_triangles[meshlets[i].triangle_offset], meshlets[i].triangle_count, meshlets[i].vertex_count);
+		meshopt_optimizeMeshletLevel(&meshlet_vertices[meshlets[i].vertex_offset], meshlets[i].vertex_count, &meshlet_triangles[meshlets[i].triangle_offset], meshlets[i].triangle_count, level);
 
 	// optimize the order of vertex references within each meshlet and globally; this is valuable for access locality and critical for compression of vertex references
 	// note that this reorders the vertex buffer too, so if a traditional index buffer is required it would need to be reconstructed from the meshlet data for optimal locality

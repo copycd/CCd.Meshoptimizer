@@ -2749,7 +2749,7 @@ static void encodeMeshletBound()
 	    2, 1, 3,
 	    3, 5, 4,
 	    2, 0, 6,
-	    7, 7, 7, // clang-format :-/
+	    6, 6, 6, // clang-format :-/
 	};
 
 	const unsigned int vertices[7] = {
@@ -2980,7 +2980,7 @@ static void opacityMap()
 			texture[y * texture_size + x] = (unsigned char)meshopt_quantizeUnorm(dc + 0.5f, 8);
 		}
 
-	// subdivision parameterrs
+	// subdivision parameters
 	const float target_edge = 2.5f;
 	const int max_level = 4;
 
@@ -2991,7 +2991,7 @@ static void opacityMap()
 	{
 		int states = 2 << k;
 
-		int levels[triangle_count];
+		unsigned char levels[triangle_count];
 		unsigned int sources[triangle_count];
 		int omm_indices[triangle_count];
 
@@ -3023,10 +3023,6 @@ static void opacityMap()
 			const float* uv0 = &uvs[indices[tri * 3 + 0] * 2];
 			const float* uv1 = &uvs[indices[tri * 3 + 1] * 2];
 			const float* uv2 = &uvs[indices[tri * 3 + 2] * 2];
-
-			// we can use mip 0 to rasterize for maximally conservative rasterization, or use the preferred mip for best performance
-			int mip = meshopt_opacityMapPreferredMip(levels[i], uv0, uv1, uv2, texture_size, texture_size);
-			assert(mip >= 0 && mip <= 5);
 
 			meshopt_opacityMapRasterize(&data[offsets[i]], levels[i], states, uv0, uv1, uv2, texture, 1, texture_size, texture_size, texture_size);
 
@@ -3062,8 +3058,8 @@ static void opacityMap()
 	float opaque = float(histogram[0][1]) / float(histogram[0][0] + histogram[0][1]);
 	float known = float(histogram[1][0] + histogram[1][1]) / float(histogram[1][0] + histogram[1][1] + histogram[1][2] + histogram[1][3]);
 
-	assert(fabsf(opaque - 0.38f) < 1e-2f);
-	assert(fabsf(known - 0.66f) < 1e-2f);
+	assert(fabsf(opaque - 0.36f) < 1e-2f);
+	assert(fabsf(known - 0.76f) < 1e-2f);
 }
 
 void runTests()
@@ -3193,4 +3189,6 @@ void runTests()
 	decodeMeshletSafety();
 	decodeMeshletBasic();
 	decodeMeshletTypical();
+
+	opacityMap();
 }
