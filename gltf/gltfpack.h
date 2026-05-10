@@ -147,6 +147,7 @@ struct Settings
 	bool mesh_merge;
 	bool mesh_instancing;
 	bool mesh_interleaved;
+	bool mesh_tangents;
 
 	float simplify_ratio;
 	float simplify_error;
@@ -343,13 +344,14 @@ void mergeMeshInstances(Mesh& mesh);
 void mergeMeshes(std::vector<Mesh>& meshes, const Settings& settings);
 void filterEmptyMeshes(std::vector<Mesh>& meshes);
 void filterStreams(Mesh& mesh, const MaterialInfo& mi);
+void generateTangents(Mesh& mesh);
 
 void mergeMeshMaterials(cgltf_data* data, std::vector<Mesh>& meshes, const Settings& settings);
 void markNeededMaterials(cgltf_data* data, std::vector<MaterialInfo>& materials, const std::vector<Mesh>& meshes, const Settings& settings);
 
 void mergeTextures(cgltf_data* data, std::vector<TextureInfo>& textures);
 
-bool hasValidTransform(const cgltf_texture_view& view);
+bool isValidTransform(const cgltf_texture_transform& transform);
 
 void analyzeMaterials(cgltf_data* data, std::vector<MaterialInfo>& materials, std::vector<TextureInfo>& textures, std::vector<ImageInfo>& images);
 void optimizeMaterials(cgltf_data* data, std::vector<MaterialInfo>& materials, std::vector<ImageInfo>& images, const char* input_path);

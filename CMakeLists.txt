@@ -42,6 +42,7 @@ set(SOURCES
     src/simplifier.cpp
     src/spatialorder.cpp
     src/stripifier.cpp
+    src/tangentspace.cpp
     src/vcacheoptimizer.cpp
     src/vertexcodec.cpp
     src/vertexfilter.cpp
@@ -138,7 +139,7 @@ if(MESHOPT_BUILD_GLTFPACK)
             message(FATAL_ERROR "Basis Universal path ${BASISU_PATH} not found")
         endif()
 
-        if (NOT SSE AND NOT MSVC AND CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+        if (NOT SSE AND NOT BASISU_SSE AND NOT MSVC AND CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
             message(WARNING "Building Basis Universal without SSE4.1 support; performance may be suboptimal")
         endif()
 

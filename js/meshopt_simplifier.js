@@ -74,7 +74,6 @@ var MeshoptSimplifier = (function () {
 		heap = new Uint8Array(instance.exports.memory.buffer);
 		var remap = new Uint32Array(vertices);
 		new Uint8Array(remap.buffer).set(heap.subarray(rp, rp + vertices * 4));
-		indices8.set(heap.subarray(ip, ip + indices.length * 4));
 		sbrk(ip - sbrk(0));
 
 		for (var i = 0; i < indices.length; ++i) indices[i] = remap[indices[i]];
@@ -249,7 +248,7 @@ var MeshoptSimplifier = (function () {
 		var sbrk = instance.exports.sbrk;
 		var ti = sbrk(target_vertex_count * 4);
 		var sp = sbrk(vertex_count * vertex_positions_stride);
-		var sc = sbrk(vertex_count * vertex_colors_stride);
+		var sc = vertex_colors ? sbrk(vertex_count * vertex_colors_stride) : 0;
 		var heap = new Uint8Array(instance.exports.memory.buffer);
 		heap.set(bytes(vertex_positions), sp);
 		if (vertex_colors) {
@@ -322,6 +321,7 @@ var MeshoptSimplifier = (function () {
 		Prune: 8,
 		Regularize: 16,
 		Permissive: 32,
+		RegularizeLight: 64,
 		_InternalDebug: 1 << 30, // internal, don't use!
 	};
 
@@ -336,7 +336,14 @@ var MeshoptSimplifier = (function () {
 			assert(indices.length % 3 == 0);
 
 			var indices32 = indices.BYTES_PER_ELEMENT == 4 ? indices : new Uint32Array(indices);
-			return reorder(instance.exports.meshopt_optimizeVertexFetchRemap, indices32, maxindex(indices) + 1);
+			var result = reorder(instance.exports.meshopt_optimizeVertexFetchRemap, indices32, maxindex(indices) + 1);
+			if (indices !== indices32) {
+				// copy back indices if they were converted to Uint32Array
+				for (var i = 0; i < indices32.length; ++i) {
+					indices[i] = indices32[i];
+				}
+			}
+			return result;
 		},
 
 		generatePositionRemap: function (vertex_positions, vertex_positions_stride) {
@@ -542,7 +549,7 @@ var MeshoptSimplifier = (function () {
 					vertex_positions_stride * 4,
 					vertex_colors,
 					vertex_colors_stride * 4,
-					color_weight,
+					color_weight || 0,
 					target_vertex_count
 				);
 			} else {
