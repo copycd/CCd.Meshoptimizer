@@ -124,7 +124,7 @@ if(MESHOPT_BUILD_DEMO)
 endif()
 
 if(MESHOPT_BUILD_GLTFPACK)
-    add_executable(gltfpack ${GLTF_SOURCES})
+    add_executable(gltfpack ${GLTF_SOURCES} gltf/main.cpp)
     set_target_properties(gltfpack PROPERTIES CXX_STANDARD 11)
     target_link_libraries(gltfpack meshoptimizer)
 

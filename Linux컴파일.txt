@@ -7,6 +7,17 @@ cmake -B build_linux -DCMAKE_BUILD_TYPE=Release -DMESHOPT_BUILD_CCd_LINUX=ON -DM
 cmake --build build_linux --parallel
 
 
+[TEST]
+gcc test/test_so.c \
+    -L./build_linux \
+    -lCCdMeshOptimizer \
+    -Wl,-rpath,./build_linux \
+    -o test/test_so
+
+./test/test_so
+
+
+
 [Docker 만들기]
 컴파일 성공하면
 docker build -t ccd-meshoptimizer .
