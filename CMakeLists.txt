@@ -186,10 +186,10 @@ if(MESHOPT_BUILD_CCd_LINUX AND NOT WIN32)
         CXX_STANDARD 20
         CXX_VISIBILITY_PRESET hidden
         VISIBILITY_INLINES_HIDDEN ON
-        OUTPUT_NAME "CCdMeshOptimizer"
+        OUTPUT_NAME "HeliosenGltfpack"
     )
     target_compile_definitions(CCdMeshOptimizer PRIVATE MYLIBRARY_EXPORTS)
-    target_link_libraries(CCdMeshOptimizer meshoptimizer)
+    target_link_libraries(CCdMeshOptimizer meshoptimizer dl)
     target_include_directories(CCdMeshOptimizer PRIVATE src)
 
     if(NOT MESHOPT_GLTFPACK_BASISU_PATH STREQUAL "")

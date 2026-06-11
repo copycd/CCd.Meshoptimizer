@@ -1310,9 +1310,50 @@ void applySetting(T (&data)[TextureKind__Count], T value, unsigned int mask = ~0
 }
 
 #ifndef GLTFFUZZ
+
+// copycd:: module name validation
+#ifndef _WIN32
+#include <dlfcn.h>
+static bool checkModuleName()
+{
+	Dl_info info;
+	if (dladdr((void*)&gltfMain, &info) && info.dli_fname)
+	{
+		std::string fname = info.dli_fname;
+		size_t pos = fname.find_last_of('/');
+		std::string name = (pos != std::string::npos) ? fname.substr(pos + 1) : fname;
+		return name == "libHeliosenGltfpack.so";
+	}
+	return false;
+}
+#else
+#include <windows.h>
+static bool checkModuleName()
+{
+	char path[MAX_PATH] = {};
+	HMODULE hModule = NULL;
+	if (!GetModuleHandleExA(
+		GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+		(LPCSTR)&gltfMain, &hModule))
+		return false;
+	GetModuleFileNameA(hModule, path, MAX_PATH);
+	std::string fname = path;
+	size_t pos = fname.find_last_of("\\/");
+	std::string name = (pos != std::string::npos) ? fname.substr(pos + 1) : fname;
+	std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return std::tolower(c); });
+	return name == "heliosen.gltfpack.dll";
+}
+#endif
+
 // copycd:: renamed from main() so shared library can export gltfMain directly
 int gltfMain(int argc, char** argv)
 {
+	if (!checkModuleName())
+	{
+		fprintf(stderr, "Error: invalid user.\n");
+		exit(1);
+	}
+
 #ifndef __wasi__
 	setlocale(LC_ALL, "C"); // disable locale specific convention for number parsing/printing
 #endif
