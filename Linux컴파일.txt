@@ -3,7 +3,12 @@
   cd /mnt/d/GitHub/CCd.Meshoptimizer
   
 - 아래 명령 수행.  
-cmake -B build_linux -DCMAKE_BUILD_TYPE=Release -DMESHOPT_BUILD_CCd_LINUX=ON -DMESHOPT_INSTALL=OFF
+cmake -B build_linux \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DMESHOPT_BUILD_CCd_LINUX=ON \
+    -DMESHOPT_GLTFPACK_BASISU_PATH=/mnt/d/GitHub/CCd.basis_universal \
+    -DMESHOPT_INSTALL=OFF
+	
 cmake --build build_linux --parallel
 
 
