@@ -17,7 +17,7 @@
 #include "../src/meshoptimizer.h"
 
 // copycd::. need to change when programe is changed.
-auto programVersion = "5.2605.09";
+auto programVersion = "5.2606.11";
 
 std::string getVersion()
 {
@@ -1780,6 +1780,14 @@ int gltfMain(int argc, char** argv)
 		fprintf(stderr, "Option -cf can not be used together with -vpf, -vtf or -vnf\n");
 		return 1;
 	}
+
+#ifdef GLTFPACK_NO_EXPERIMENTAL
+	if (settings.mesh_tangents)
+	{
+		fprintf(stderr, "Option -gt is not available in this build\n");
+		return 1;
+	}
+#endif
 
 	if (settings.keep_nodes && (settings.mesh_merge || settings.mesh_instancing))
 		fprintf(stderr, "Warning: option -kn disables mesh merge (-mm) and mesh instancing (-mi) optimizations\n");
