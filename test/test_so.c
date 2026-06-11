@@ -4,9 +4,7 @@
 extern const char* GetTestMessage();
 extern int CallMain(int argc, char** argv);
 
-int main() {
+int main(int argc, char** argv) {
     printf("%s\n", GetTestMessage());
-
-    char* args[] = { "gltfpack", "-h", NULL };
-    return CallMain(2, args);
+    return CallMain(argc, argv);
 }

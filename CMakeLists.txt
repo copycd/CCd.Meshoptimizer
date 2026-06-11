@@ -191,6 +191,51 @@ if(MESHOPT_BUILD_CCd_LINUX AND NOT WIN32)
     target_compile_definitions(CCdMeshOptimizer PRIVATE MYLIBRARY_EXPORTS)
     target_link_libraries(CCdMeshOptimizer meshoptimizer)
     target_include_directories(CCdMeshOptimizer PRIVATE src)
+
+    if(NOT MESHOPT_GLTFPACK_BASISU_PATH STREQUAL "")
+        get_filename_component(BASISU_PATH ${MESHOPT_GLTFPACK_BASISU_PATH} ABSOLUTE)
+
+        if(NOT TARGET basisu_encoder)
+            add_library(basisu_encoder STATIC
+                ${BASISU_PATH}/encoder/basisu_backend.cpp
+                ${BASISU_PATH}/encoder/basisu_basis_file.cpp
+                ${BASISU_PATH}/encoder/basisu_comp.cpp
+                ${BASISU_PATH}/encoder/basisu_enc.cpp
+                ${BASISU_PATH}/encoder/basisu_etc.cpp
+                ${BASISU_PATH}/encoder/basisu_frontend.cpp
+                ${BASISU_PATH}/encoder/basisu_gpu_texture.cpp
+                ${BASISU_PATH}/encoder/basisu_pvrtc1_4.cpp
+                ${BASISU_PATH}/encoder/basisu_resampler.cpp
+                ${BASISU_PATH}/encoder/basisu_resample_filters.cpp
+                ${BASISU_PATH}/encoder/basisu_ssim.cpp
+                ${BASISU_PATH}/encoder/basisu_uastc_enc.cpp
+                ${BASISU_PATH}/encoder/basisu_bc7enc.cpp
+                ${BASISU_PATH}/encoder/jpgd.cpp
+                ${BASISU_PATH}/encoder/basisu_kernels_sse.cpp
+                ${BASISU_PATH}/encoder/basisu_opencl.cpp
+                ${BASISU_PATH}/encoder/pvpngreader.cpp
+                ${BASISU_PATH}/transcoder/basisu_transcoder.cpp
+            )
+            target_include_directories(basisu_encoder PUBLIC ${BASISU_PATH})
+            find_library(ZSTD_LIB NAMES zstd REQUIRED)
+            target_compile_definitions(basisu_encoder PUBLIC
+                BASISD_SUPPORT_KTX2_ZSTD=1
+                BASISU_SUPPORT_SSE=0
+            )
+            set_target_properties(basisu_encoder PROPERTIES POSITION_INDEPENDENT_CODE ON)
+            target_compile_options(basisu_encoder PRIVATE
+                -fvisibility=hidden -fno-strict-aliasing -DBASISU_SUPPORT_SSE=0
+            )
+            find_package(Threads REQUIRED)
+            target_link_libraries(basisu_encoder Threads::Threads m ${ZSTD_LIB})
+        endif()
+
+        target_compile_definitions(CCdMeshOptimizer PRIVATE WITH_BASISU)
+        target_link_libraries(CCdMeshOptimizer -Wl,--whole-archive basisu_encoder -Wl,--no-whole-archive)
+        set_source_files_properties(gltf/encodebasis.cpp PROPERTIES INCLUDE_DIRECTORIES ${BASISU_PATH})
+        find_package(Threads REQUIRED)
+        target_link_libraries(CCdMeshOptimizer Threads::Threads)
+    endif()
 endif()
 
 if(MESHOPT_INSTALL)

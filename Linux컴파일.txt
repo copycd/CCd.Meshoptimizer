@@ -14,7 +14,8 @@ gcc test/test_so.c \
     -Wl,-rpath,./build_linux \
     -o test/test_so
 
-./test/test_so
+// 이렇게 실행하면, 압축된 glb가 나와야 성공.
+./test/test_so -i ./test/data/tree.glb -o ./test/data/treeout.glb -c -tc
 
 
 
