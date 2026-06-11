@@ -175,6 +175,24 @@ if(MESHOPT_BUILD_GLTFPACK)
     endif()
 endif()
 
+option(MESHOPT_BUILD_CCd_LINUX "Build CCd Linux shared library (CCdMeshOptimizer.so)" OFF)
+
+if(MESHOPT_BUILD_CCd_LINUX AND NOT WIN32)
+    add_library(CCdMeshOptimizer SHARED
+        CCd.MeshOptimizerLinux/MyLibrary.cpp
+        ${GLTF_SOURCES}
+    )
+    set_target_properties(CCdMeshOptimizer PROPERTIES
+        CXX_STANDARD 20
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
+        OUTPUT_NAME "CCdMeshOptimizer"
+    )
+    target_compile_definitions(CCdMeshOptimizer PRIVATE MYLIBRARY_EXPORTS)
+    target_link_libraries(CCdMeshOptimizer meshoptimizer)
+    target_include_directories(CCdMeshOptimizer PRIVATE src)
+endif()
+
 if(MESHOPT_INSTALL)
 	include(GNUInstallDirs)
 

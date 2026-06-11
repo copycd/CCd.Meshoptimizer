@@ -22,8 +22,11 @@ auto programVersion = "5.2605.09";
 std::string getVersion()
 {
 	char result[32];
-	// copycd:: because of error
+#ifdef _WIN32
 	sprintf_s(result, sizeof(result), "%d.%d.2605", MESHOPTIMIZER_VERSION / 1000, (MESHOPTIMIZER_VERSION % 1000) / 10);
+#else
+	snprintf(result, sizeof(result), "%d.%d.2605", MESHOPTIMIZER_VERSION / 1000, (MESHOPTIMIZER_VERSION % 1000) / 10);
+#endif
 	return result;
 }
 
@@ -219,8 +222,11 @@ static bool printReport(const char* path, const std::vector<BufferView>& views, 
 	}
 
 	FILE* out = NULL;
-	// copycd::. because of error
+#ifdef _WIN32
 	fopen_s(&out, path, "wb");
+#else
+	out = fopen(path, "wb");
+#endif
 	if (!out)
 		return false;
 

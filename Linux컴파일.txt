@@ -1,0 +1,13 @@
+- 여기서 리눅스 Shell을 Open.
+  혹은  프로젝트 위치로 이동 
+  cd /mnt/d/GitHub/CCd.Meshoptimizer
+  
+- 아래 명령 수행.  
+cmake -B build_linux -DCMAKE_BUILD_TYPE=Release -DMESHOPT_BUILD_CCd_LINUX=ON -DMESHOPT_INSTALL=OFF
+cmake --build build_linux --parallel
+
+
+[Docker 만들기]
+컴파일 성공하면
+docker build -t ccd-meshoptimizer .
+만일 docker가 없다고 에러나면, windows host에서 docker를 실행했는지 확인.

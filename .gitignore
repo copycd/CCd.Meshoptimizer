@@ -18,3 +18,7 @@ compile_commands.json
 /*.log
 /perf.data*
 /bin
+
+
+# 빌드과정에서 생성되는 파일들
+/build_linux/
