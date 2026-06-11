@@ -24,6 +24,7 @@
 #include <vector>
 // copycd::
 #include <filesystem>
+#include <ostream>
 
 struct Attr
 {

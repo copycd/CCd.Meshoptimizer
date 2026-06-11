@@ -1314,36 +1314,47 @@ void applySetting(T (&data)[TextureKind__Count], T value, unsigned int mask = ~0
 // copycd:: module name validation
 #ifndef _WIN32
 #include <dlfcn.h>
-static bool checkModuleName()
+#else
+#include <windows.h>
+#endif
+
+static std::string getModuleBaseName()
 {
+	std::string name;
+#ifndef _WIN32
 	Dl_info info;
 	if (dladdr((void*)&gltfMain, &info) && info.dli_fname)
 	{
 		std::string fname = info.dli_fname;
-		size_t pos = fname.find_last_of('/');
-		std::string name = (pos != std::string::npos) ? fname.substr(pos + 1) : fname;
-		return name == "libHeliosenGltfpack.so";
+		size_t slash = fname.find_last_of('/');
+		name = (slash != std::string::npos) ? fname.substr(slash + 1) : fname;
 	}
-	return false;
-}
 #else
-#include <windows.h>
-static bool checkModuleName()
-{
 	char path[MAX_PATH] = {};
 	HMODULE hModule = NULL;
-	if (!GetModuleHandleExA(
+	if (GetModuleHandleExA(
 		GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
 		(LPCSTR)&gltfMain, &hModule))
-		return false;
-	GetModuleFileNameA(hModule, path, MAX_PATH);
-	std::string fname = path;
-	size_t pos = fname.find_last_of("\\/");
-	std::string name = (pos != std::string::npos) ? fname.substr(pos + 1) : fname;
-	std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return std::tolower(c); });
-	return name == "heliosen.gltfpack.dll";
-}
+	{
+		GetModuleFileNameA(hModule, path, MAX_PATH);
+		std::string fname = path;
+		size_t slash = fname.find_last_of("\\/");
+		name = (slash != std::string::npos) ? fname.substr(slash + 1) : fname;
+		std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return std::tolower(c); });
+	}
 #endif
+	size_t dot = name.find_last_of('.');
+	return (dot != std::string::npos) ? name.substr(0, dot) : name;
+}
+
+static bool checkModuleName()
+{
+#ifndef _WIN32
+	return getModuleBaseName() == "libHeliosenGltfpack";
+#else
+	return getModuleBaseName() == "heliosen.gltfpack";
+#endif
+}
 
 // copycd:: renamed from main() so shared library can export gltfMain directly
 int gltfMain(int argc, char** argv)
