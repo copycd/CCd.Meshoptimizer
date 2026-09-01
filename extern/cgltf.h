@@ -2939,11 +2939,19 @@ static void cgltf_parse_attribute_type(const char* name, cgltf_attribute_type* o
 			return;
 		}
 		// copycd:: 3dtiles batchid for Next glb format.
-		else if (len == 0 && strncmp(name, "_FEATURE_ID", 11) == 0)
+		else if (strncmp(name, "_FEATURE_ID_", 12) == 0)
 		{
-			// copycd::
+			// copycd:: 아래로 흘려보내면 POSITION/NORMAL/... 체인이 전부 실패하고
+			// 마지막 else가 invalid로 덮어써버림. 여기서 인덱스까지 정하고 바로 반환함.
+			// us는 맨 앞 '_'를 가리키므로 인덱스는 이름 뒤쪽에서 직접 읽어야 함.
 			*out_type = cgltf_attribute_type_featureid;
-			// 계속 아래로 진행.
+			*out_index = CGLTF_ATOI(name + 12);
+			if (*out_index < 0)
+			{
+				*out_type = cgltf_attribute_type_invalid;
+				*out_index = 0;
+			}
+			return;
 		}
 		else
 		{
