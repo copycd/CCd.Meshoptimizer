@@ -17,15 +17,15 @@
 #include "../src/meshoptimizer.h"
 
 // copycd::. need to change when programe is changed.
-auto programVersion = "5.2606.11";
+auto programVersion = "5.2609.01";
 
 std::string getVersion()
 {
 	char result[32];
 #ifdef _WIN32
-	sprintf_s(result, sizeof(result), "%d.%d.2605", MESHOPTIMIZER_VERSION / 1000, (MESHOPTIMIZER_VERSION % 1000) / 10);
+	sprintf_s(result, sizeof(result), "%d.%d.2609", MESHOPTIMIZER_VERSION / 1000, (MESHOPTIMIZER_VERSION % 1000) / 10);
 #else
-	snprintf(result, sizeof(result), "%d.%d.2605", MESHOPTIMIZER_VERSION / 1000, (MESHOPTIMIZER_VERSION % 1000) / 10);
+	snprintf(result, sizeof(result), "%d.%d.2609", MESHOPTIMIZER_VERSION / 1000, (MESHOPTIMIZER_VERSION % 1000) / 10);
 #endif
 	return result;
 }
