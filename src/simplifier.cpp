@@ -941,7 +941,7 @@ static void quadricFromAttributes(Quadric& Q, QuadricGrad* G, const Vector3& p0,
 
 		Q.c += w * (gw * gw);
 
-		// the only remaining sum components are ones that depend on attr; these will be addded during error evaluation, see quadricError
+		// the only remaining sum components are ones that depend on attr; these will be added during error evaluation, see quadricError
 		G[k].gx = w * gx;
 		G[k].gy = w * gy;
 		G[k].gz = w * gz;
@@ -1154,6 +1154,68 @@ static void fillEdgeQuadrics(Quadric* vertex_quadrics, const unsigned int* indic
 			quadricAdd(vertex_quadrics[remap[i1]], Q);
 		}
 	}
+}
+
+static unsigned int oppositeVertex(const EdgeAdjacency& adjacency, unsigned int a, unsigned int b, const unsigned int* remap, const unsigned int* wedge)
+{
+	unsigned int v = a;
+	unsigned int r = ~0u;
+
+	do
+	{
+		unsigned int count = adjacency.offsets[v + 1] - adjacency.offsets[v];
+		const EdgeAdjacency::Edge* edges = adjacency.data + adjacency.offsets[v];
+
+		for (size_t i = 0; i < count; ++i)
+			if (remap[edges[i].next] == remap[b])
+				r = (r == ~0u) ? edges[i].prev : a;
+
+		v = wedge[v];
+	} while (v != a);
+
+	// we only return the opposite vertex if it's unique
+	return r == a ? ~0u : r;
+}
+
+static void fillFoldQuadrics(Quadric* vertex_quadrics, const EdgeAdjacency& adjacency, const Vector3* vertex_positions, size_t vertex_count, const unsigned int* remap, const unsigned int* wedge)
+{
+	for (size_t i0 = 0; i0 < vertex_count; ++i0)
+		for (unsigned int i = adjacency.offsets[i0]; i < adjacency.offsets[i0 + 1]; ++i)
+		{
+			unsigned int i1 = adjacency.data[i].next;
+			unsigned int i2 = adjacency.data[i].prev;
+
+			// since we only process paired edges each edge should occur twice; skip redundant edges
+			if (remap[i1] > remap[i0])
+				continue;
+
+			unsigned int i3 = oppositeVertex(adjacency, i1, unsigned(i0), remap, wedge);
+
+			if (i3 == ~0u)
+				continue;
+
+			Vector3 p10 = {vertex_positions[i1].x - vertex_positions[i0].x, vertex_positions[i1].y - vertex_positions[i0].y, vertex_positions[i1].z - vertex_positions[i0].z};
+			Vector3 p20 = {vertex_positions[i2].x - vertex_positions[i0].x, vertex_positions[i2].y - vertex_positions[i0].y, vertex_positions[i2].z - vertex_positions[i0].z};
+			Vector3 p30 = {vertex_positions[i3].x - vertex_positions[i0].x, vertex_positions[i3].y - vertex_positions[i0].y, vertex_positions[i3].z - vertex_positions[i0].z};
+
+			Vector3 normal = {p10.y * p20.z - p10.z * p20.y, p10.z * p20.x - p10.x * p20.z, p10.x * p20.y - p10.y * p20.x};
+			Vector3 opposite = {p30.y * p10.z - p30.z * p10.y, p30.z * p10.x - p30.x * p10.z, p30.x * p10.y - p30.y * p10.x};
+			float nl = sqrtf(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
+			float ol = sqrtf(opposite.x * opposite.x + opposite.y * opposite.y + opposite.z * opposite.z);
+
+			// identify folds by checking dihedral angle against a somewhat arbitrary ~30 degree cutoff
+			if (normal.x * opposite.x + normal.y * opposite.y + normal.z * opposite.z >= -0.85f * nl * ol)
+				continue;
+
+			// use both triangles for symmetry since we won't visit this edge again
+			Quadric Q, QO;
+			quadricFromTriangleEdge(Q, vertex_positions[i0], vertex_positions[i1], vertex_positions[i2], 1.f);
+			quadricFromTriangleEdge(QO, vertex_positions[i0], vertex_positions[i1], vertex_positions[i3], 1.f);
+			quadricAdd(Q, QO);
+
+			quadricAdd(vertex_quadrics[remap[i0]], Q);
+			quadricAdd(vertex_quadrics[remap[i1]], Q);
+		}
 }
 
 static void fillAttributeQuadrics(Quadric* attribute_quadrics, QuadricGrad* attribute_gradients, const unsigned int* indices, size_t index_count, const Vector3* vertex_positions, const float* vertex_attributes, size_t attribute_count)
@@ -2446,6 +2508,9 @@ size_t meshopt_simplifyEdge(unsigned int* destination, const unsigned int* indic
 	fillVertexQuadrics(vertex_quadrics, vertex_positions, vertex_count, remap, vertex_lock, sparse_remap, options);
 	fillEdgeQuadrics(vertex_quadrics, result, index_count, vertex_positions, remap, vertex_kind, loop, loopback);
 
+	if (options & meshopt_SimplifyPreserveFolds)
+		fillFoldQuadrics(vertex_quadrics, adjacency, vertex_positions, vertex_count, remap, wedge);
+
 	if (attribute_count)
 		fillAttributeQuadrics(attribute_quadrics, attribute_gradients, result, index_count, vertex_positions, vertex_attributes, attribute_count);
 
@@ -2652,6 +2717,7 @@ size_t meshopt_simplifySloppy(unsigned int* destination, const unsigned int* ind
 	assert(vertex_positions_stride >= 12 && vertex_positions_stride <= 256);
 	assert(vertex_positions_stride % sizeof(float) == 0);
 	assert(target_index_count <= index_count);
+	assert(target_error >= 0);
 
 	// we expect to get ~2 triangles/vertex in the output
 	size_t target_cell_count = target_index_count / 6;
@@ -2850,7 +2916,7 @@ size_t meshopt_simplifyPoints(unsigned int* destination, const float* vertex_pos
 	size_t min_vertices = 0;
 	size_t max_vertices = vertex_count;
 
-	// instead of starting in the middle, let's guess as to what the answer might be! triangle count usually grows as a square of grid size...
+	// instead of starting in the middle, let's guess as to what the answer might be! surface point count usually grows as a square of grid size...
 	int next_grid_size = int(sqrtf(float(target_cell_count)) + 0.5f);
 
 	for (int pass = 0; pass < 10 + kInterpolationPasses; ++pass)

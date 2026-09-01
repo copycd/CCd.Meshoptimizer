@@ -13,10 +13,10 @@ Two companion projects are developed and distributed alongside the library: [glt
 meshoptimizer is hosted on GitHub; you can download the latest release using git:
 
 ```
-git clone -b v1.1 https://github.com/zeux/meshoptimizer.git
+git clone -b v1.2 https://github.com/zeux/meshoptimizer.git
 ```
 
-Alternatively you can [download the .zip archive from GitHub](https://github.com/zeux/meshoptimizer/archive/v1.1.zip).
+Alternatively you can [download the .zip archive from GitHub](https://github.com/zeux/meshoptimizer/archive/v1.2.zip).
 
 The library is also available as a Linux package in several distributions ([ArchLinux](https://aur.archlinux.org/packages/meshoptimizer/), [Debian](https://packages.debian.org/libmeshoptimizer), [FreeBSD](https://www.freshports.org/misc/meshoptimizer/), [Nix](https://mynixos.com/nixpkgs/package/meshoptimizer), [Ubuntu](https://packages.ubuntu.com/libmeshoptimizer)), as well as a [Vcpkg port](https://github.com/microsoft/vcpkg/tree/master/ports/meshoptimizer) (see [installation instructions](https://learn.microsoft.com/en-us/vcpkg/get_started/get-started)) and a [Conan package](https://conan.io/center/recipes/meshoptimizer).
 
@@ -537,6 +537,8 @@ The following guarantees on data compatibility are provided for point releases (
 
 By default, vertex data is encoded for format version 1 (compatible with meshoptimizer v0.23+), and index data is encoded for format version 1 (compatible with meshoptimizer v0.14+). When decoding the data, the decoder will automatically detect the version from the data header.
 
+Meshlet data uses a frameless format without an embedded version header, so it's compatible across all library versions (starting with meshoptimizer v1.1). Any future change to meshlet encoding would be exposed as new functions; to adopt future improvements without breaking existing data, applications could record a format version externally, once per entire meshlet stream or file.
+
 ## Simplification
 
 All algorithms presented so far don't affect visual appearance at all, with the exception of quantization that has minimal controlled impact. However, fundamentally the most effective way to reduce the rendering or transmission cost of a mesh is to reduce the number of triangles in the mesh.
@@ -630,6 +632,7 @@ This approach provides fine-grained control over which discontinuities to preser
 All simplification functions described so far reuse the original vertex buffer and only produce a new index buffer. This means that the resulting mesh will have the same vertex positions and attributes as the original mesh; this is optimal for minimizing the memory consumption and for highly detailed meshes often provides good quality. However, for more aggressive simplification to retain visual quality, it may be necessary to adjust vertex data for optimal appearance. This can be done by using a variant of the simplification function that updates vertex positions and attributes, `meshopt_simplifyWithUpdate`:
 
 ```c++
+float result_error = 0.f;
 indices.resize(meshopt_simplifyWithUpdate(&indices[0], indices.size(), &vertices[0].px, vertices.size(), sizeof(Vertex),
     &vertices[0].nx, sizeof(Vertex), attr_weights, 3, /* vertex_lock= */ NULL,
     target_index_count, target_error, /* options= */ 0, &result_error));
@@ -655,6 +658,7 @@ For basic customization, a number of options can be passed via `options` bitmask
 - `meshopt_SimplifyPrune` allows the simplifier to remove isolated components regardless of the topological restrictions inside the component. This is generally recommended for full-mesh simplification as it can improve quality and reduce triangle count; note that with this option, triangles connected to locked vertices may be removed as part of their component.
 - `meshopt_SimplifyRegularize` produces more regular triangle sizes and shapes during simplification, at some cost to geometric quality. This can improve geometric quality under deformation such as skinning. `meshopt_SimplifyRegularizeLight` can be used instead of this flag to use a smaller regularization factor, reducing the impact on geometric quality.
 - `meshopt_SimplifyPermissive` allows collapses across attribute discontinuities, except for vertices that are tagged with `meshopt_SimplifyVertex_Protect` via `vertex_lock`.
+- `meshopt_SimplifyPreserveFolds` tries to preserve fold lines between opposite-facing triangles at a small performance cost.
 
 When using `meshopt_simplifyWithAttributes`, it is also possible to lock certain vertices by providing a `vertex_lock` array that contains a value for each vertex in the mesh, with `meshopt_SimplifyVertex_Lock` set for vertices that should not be collapsed. This can be useful to preserve certain vertices, such as the boundary of the mesh, with more control than `meshopt_SimplifyLockBorder` option provides. When using `meshopt_simplifyWithUpdate`, locking vertices (whether via `vertex_lock` or `meshopt_SimplifyLockBorder`) will also prevent the simplifier from updating their positions and attributes; this can be useful together with `meshopt_SimplifySparse` for meshlet simplification, as meshlets at one level of hierarchy can be simplified together without excessive data copying.
 
@@ -905,6 +909,19 @@ for (size_t i = 0; i < indices.size(); ++i)
 
 The algorithm uses a MikkTSpace-like construction but by default, uses a modified weighting scheme that significantly improves tangent quality around beveled regions in the mesh. If the normal maps are baked from higher resolution geometry using MikkTSpace weighting, it's possible to produce MikkTSpace-compatible tangents by passing `meshopt_TangentCompatible` option as an extra argument to the function.
 
+While it is expected that the normals come from the authored mesh, this library also provides an algorithm to generate normals from positions alone:
+
+```c++
+const float crease = 1.f; // 1 rad ~= 60 deg
+const float smoothing = 1.5f;
+std::vector<vec3> normals(indices.size());
+meshopt_generateNormals(&normals[0].x, &indices[0], indices.size(), &vertices[0].px, vertices.size(), sizeof(Vertex), crease, smoothing);
+```
+
+This function classifies edges as soft/hard based on the specified crease angle (in radians; 30/45/60 degrees are commonly used values) and computes a normal for every corner by averaging normals of incident faces connected by soft edges. Additionally, the `smoothing` parameter can be used to perform additional iterative smoothing of the resulting normals, with larger values resulting in smoother normals (recommended range `[0..5]`).
+
+Similarly to `meshopt_generateTangents`, this function computes per-corner normals (3 floats for each of 3 corners of each triangle). Applying them to mesh vertices requires de-indexing the mesh, or copying normals to existing vertices while duplicating vertices with different normals.
+
 ## Memory management
 
 Many algorithms allocate temporary memory to store intermediate results or accelerate processing. The amount of memory allocated is a function of various input parameters such as vertex count and index count. By default memory is allocated using `operator new` and `operator delete`; if these operators are overloaded by the application, the overloads will be used instead. Alternatively it's possible to specify custom allocation/deallocation functions using `meshopt_setAllocator`, e.g.
@@ -915,7 +932,9 @@ meshopt_setAllocator(malloc, free);
 
 > Note that the library expects the allocation function to either throw in case of out-of-memory (in which case the exception will propagate to the caller) or abort, so technically the use of `malloc` above isn't safe. If you want to handle out-of-memory errors without using C++ exceptions, you can use `setjmp`/`longjmp` instead.
 
-Vertex and index decoders (`meshopt_decodeVertexBuffer`, `meshopt_decodeIndexBuffer`, `meshopt_decodeIndexSequence`) do not allocate memory and work completely within the buffer space provided via arguments.
+When building meshoptimizer as a shared library, allocations from the templated index wrappers provided in the header (used when index data is not `unsigned int`) will only be redirected to these callbacks if the library is built with `MESHOPTIMIZER_ALLOC_EXPORT` defined.
+
+Vertex, index and meshlet decoders (`meshopt_decodeVertexBuffer`, `meshopt_decodeIndexBuffer`, `meshopt_decodeIndexSequence`, `meshopt_decodeMeshlet`, `meshopt_decodeMeshletRaw`) do not allocate memory and work completely within the buffer space provided via arguments.
 
 All functions have bounded stack usage that does not exceed 32 KB for any algorithms.
 
@@ -931,15 +950,12 @@ Applications may configure the library to change the attributes of experimental 
 
 Currently, the following APIs are experimental:
 
-- `meshopt_SimplifyPermissive` mode for `meshopt_simplify*` functions
-- `meshopt_SimplifyVertex_Priority` flag for `vertex_lock` parameter to `meshopt_simplify*` functions
-- `meshopt_SimplifyRegularizeLight` flag for `meshopt_simplify*` functions
-- `meshopt_encode/decodeMeshlet*` functions (`meshopt_encodeMeshlet`, `meshopt_encodeMeshletBound`, `meshopt_decodeMeshlet`, `meshopt_decodeMeshletRaw`)
-- `meshopt_extractMeshletIndices` and `meshopt_optimizeMeshletLevel` functions
-- `meshopt_computePositionExponent` function
+- `meshopt_SimplifyPermissive` mode and `meshopt_SimplifyPreserveFolds` flag for `meshopt_simplify*` functions
 - `meshopt_opacityMap*` functions (`meshopt_opacityMapMeasure`, `meshopt_opacityMapRasterize`, `meshopt_opacityMapCompact`, `meshopt_opacityMapEntrySize`)
 - `meshopt_generateTangents` function and `meshopt_Tangent*` flags
+- `meshopt_generateNormals` function
 - `meshopt_filterIndexBuffer` and `meshopt_filterIndexBufferMulti` functions
+- `meshopt_computePositionExponent` function
 
 ## License
 

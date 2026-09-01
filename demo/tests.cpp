@@ -623,6 +623,31 @@ static void decodeVertexBitGroupSentinels()
 	assert(memcmp(decoded, data, sizeof(data)) == 0);
 }
 
+static void decodeVertexBitGroupSentinelCount()
+{
+	const unsigned char expected[13 * 4] = {
+	    0xff, 0, 0, 0, 0xfe, 0, 0, 0, 0xfd, 0, 0, 0, 0xfd, 0, 0, 0,
+	    0xfd, 0, 0, 0, 0xfc, 0, 0, 0, 0xfb, 0, 0, 0, 0xfb, 0, 0, 0,
+	    0xfa, 0, 0, 0, 0xfa, 0, 0, 0, 0xf9, 0, 0, 0, 0xf9, 0, 0, 0,
+	    0xf8, 0, 0, 0 //
+	};
+
+	// encodes several 2-bit sentinels including lane 12; lane 3 is clear so bit 30 does not alias bit 0 during counting
+	const unsigned char input[] = {
+	    0xa1, 0xa9,
+	    0x01, 0xfc, 0x3c, 0xcc, 0xcc,
+	    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+	    0x00, 0x00, 0x00, 0x00,
+	    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	    0x00, 0x00, 0x00, 0x00 //
+	};
+
+	unsigned char decoded[sizeof(expected)];
+	assert(meshopt_decodeVertexBuffer(decoded, 13, 4, input, sizeof(input)) == 0);
+	assert(memcmp(decoded, expected, sizeof(expected)) == 0);
+}
+
 static void decodeVertexDeltas()
 {
 	unsigned short data[16 * 4];
@@ -1042,6 +1067,90 @@ static void encodeFilterExpZero()
 
 	for (size_t i = 0; i < 4; ++i)
 		assert(decoded[i] == 0);
+}
+
+static void encodeFilterExpOverflow()
+{
+	// at bits=24, values with an all-ones mantissa round up to 2^23 which must be clamped
+	const float data[4] = {
+	    0.99999994f, // largest float below 1.0
+	    -0.99999994f,
+	    255.99998f, // largest float below 256.0
+	    1.f,
+	};
+	const unsigned int expected[4] = {
+	    0xe97fffff,
+	    0xe9800000, // -2^23 is representable as is
+	    0xf17fffff,
+	    0xea400000,
+	};
+
+	unsigned int encoded[4];
+	meshopt_encodeFilterExp(encoded, 4, 4, 24, data, meshopt_EncodeExpSeparate);
+
+	assert(memcmp(encoded, expected, sizeof(expected)) == 0);
+
+	float decoded[4];
+	memcpy(decoded, encoded, sizeof(decoded));
+	meshopt_decodeFilterExp(decoded, 4, 4);
+
+	assert(decoded[0] == 0.99999988f);
+	assert(decoded[1] == -1.f);
+	assert(decoded[2] == 255.99997f);
+	assert(decoded[3] == 1.f);
+}
+
+static void encodeFilterExpZeroShared()
+{
+	const float data[4] = {
+	    0.f,
+	    0.1f,
+	    -0.025f,
+	    -0.f,
+	};
+
+	// shared exponents (vector)
+	const unsigned int expected1[4] = {
+	    0xef000000,
+	    0xef003333,
+	    0xedffcccd,
+	    0xed000000,
+	};
+
+	// shared exponents (component)
+	const unsigned int expected2[4] = {
+	    0xed000000,
+	    0xef003333,
+	    0xedffcccd,
+	    0xef000000,
+	};
+
+	unsigned int encoded1[4];
+	meshopt_encodeFilterExp(encoded1, 2, 8, 15, data, meshopt_EncodeExpSharedVector);
+
+	unsigned int encoded2[4];
+	meshopt_encodeFilterExp(encoded2, 2, 8, 15, data, meshopt_EncodeExpSharedComponent);
+
+	assert(memcmp(encoded1, expected1, sizeof(expected1)) == 0);
+	assert(memcmp(encoded2, expected2, sizeof(expected2)) == 0);
+
+	float decoded1[4];
+	memcpy(decoded1, encoded1, sizeof(decoded1));
+	meshopt_decodeFilterExp(decoded1, 2, 8);
+
+	float decoded2[4];
+	memcpy(decoded2, encoded2, sizeof(decoded2));
+	meshopt_decodeFilterExp(decoded2, 2, 8);
+
+	for (size_t i = 0; i < 4; ++i)
+	{
+		assert(fabsf(decoded1[i] - data[i]) < 1e-5f);
+		assert(fabsf(decoded2[i] - data[i]) < 1e-5f);
+	}
+
+	// zeroes should be preserved exactly
+	assert(decoded1[0] == 0 && decoded1[3] == 0);
+	assert(decoded2[0] == 0 && decoded2[3] == 0);
 }
 
 static void encodeFilterExpAlias()
@@ -2555,6 +2664,33 @@ static void simplifyUpdateLocked(unsigned int options)
 	assert(vb[3][3] == 0.2f);
 }
 
+static void simplifyFolds()
+{
+	const float vb[] = {
+	    0, 0, 0, 1, 0, 0, 2, 0, 0,
+	    0, 1, 0, 1, 1, 0, 2, 1, 0 //
+	};
+
+	// 0 1 2
+	// 3 4 5 + flipped versions
+	const unsigned int ib[] = {
+	    0, 1, 3, 3, 1, 4, 1, 2, 4, 4, 2, 5,
+	    0, 3, 1, 3, 4, 1, 1, 4, 2, 4, 5, 2 //
+	};
+
+	unsigned int result[24];
+
+	// without fold preservation, the errors for all collapses are close to zero because there are no open edges to prevent this
+	assert(meshopt_simplify(result, ib, 24, vb, 6, 12, 0, 1e-3f) == 0);
+	assert(meshopt_simplify(result, ib, 24, vb, 6, 12, 0, 1e-3f, meshopt_SimplifyPreserveFolds) == 12);
+
+	const unsigned int expected[] = {
+	    0, 2, 3, 3, 2, 5, 0, 3, 2, 3, 5, 2 //
+	};
+
+	assert(memcmp(result, expected, sizeof(expected)) == 0);
+}
+
 static void filterTriangles()
 {
 	// v0/v3 match fully; v0/v4 match on prefix only
@@ -3264,6 +3400,47 @@ static void opacityMapSpecial()
 	}
 }
 
+static void tangentsBasic()
+{
+	struct Vertex
+	{
+		float px, py, pz;
+		float nx, ny, nz;
+		float tx, ty;
+	};
+
+	// unindexed quad with matching corner data for shared diagonal
+	const Vertex vertices[] = {
+	    {0, 0, 0, -0.28f, 0, 0.96f, 0, 0}, // diag 1
+	    {1, 0, 0, 0.28f, 0, 0.96f, 1, 0},
+	    {1, 1, 0, 0.28f, 0, 0.96f, 1, 1},  // diag 2
+	    {0, 0, 0, -0.28f, 0, 0.96f, 0, 0}, // diag 1
+	    {1, 1, 0, 0.28f, 0, 0.96f, 1, 1},  // diag 2
+	    {0, 1, 0, -0.28f, 0, 0.96f, 0, 1},
+	};
+
+	// unindexed input: indices == NULL, vertex_count == index_count
+	float tangents[6 * 4];
+	meshopt_generateTangents(tangents, NULL, 6, &vertices[0].px, 6, sizeof(Vertex), &vertices[0].nx, sizeof(Vertex), &vertices[0].tx, sizeof(Vertex), 0);
+
+	// (1, 0, 0) reprojected onto tilted normals
+	const float left[4] = {0.96f, 0.f, 0.28f, 1.f};
+	const float right[4] = {0.96f, 0.f, -0.28f, 1.f};
+
+	const float* expected[6] = {left, right, right, left, right, left};
+
+	for (size_t i = 0; i < 6; ++i)
+		for (size_t k = 0; k < 4; ++k)
+			assert(fabsf(tangents[i * 4 + k] - expected[i][k]) < 1e-3f);
+
+	// shared vertices get the same tangent vector
+	for (int k = 0; k < 4; ++k)
+	{
+		assert(tangents[0 * 4 + k] == tangents[3 * 4 + k]); // diag 1
+		assert(tangents[2 * 4 + k] == tangents[4 * 4 + k]); // diag 2
+	}
+}
+
 static void tangentDegenerate()
 {
 	struct Vertex
@@ -3322,6 +3499,70 @@ static void tangentDegenerate()
 			assert(fabsf(tangents[i * 4 + k] - expected[i][k]) < 1e-3f);
 }
 
+static void normalsBasic()
+{
+	const float vertices[][3] = {
+	    {-1.f, -0.57735f, 0.f},
+	    {1.f, -0.57735f, 0.f},
+	    {0.f, 1.15470f, 0.f},
+	    {0.f, 0.f, 0.38f},
+	};
+
+	// flattened tetrahedron (apex is closer to the base so that we can get soft side edges)
+	const unsigned int indices[] = {0, 2, 1, 0, 1, 3, 1, 2, 3, 2, 0, 3};
+
+	float normals[12 * 3];
+	meshopt_generateNormals(normals, indices, 12, vertices[0], 4, sizeof(vertices[0]), 3.14159265f / 3.f, 0.f);
+
+	const float base[3] = {0.f, 0.f, -1.f};
+	const float side0[3] = {-0.2707f, -0.1563f, 0.9499f};
+	const float side1[3] = {0.2707f, -0.1563f, 0.9499f};
+	const float side2[3] = {0.f, 0.3126f, 0.9499f};
+	const float apex[3] = {0.f, 0.f, 1.f};
+
+	const float* expected[12] = {base, base, base, side0, side1, apex, side1, side2, apex, side2, side0, apex};
+
+	for (size_t i = 0; i < 12; ++i)
+		for (size_t k = 0; k < 3; ++k)
+			assert(fabsf(normals[i * 3 + k] - expected[i][k]) < 1e-3f);
+
+	// shared vertices around soft side edges get the same normal vector
+	for (size_t k = 0; k < 3; ++k)
+	{
+		assert(normals[3 * 3 + k] == normals[10 * 3 + k]); // side0
+		assert(normals[4 * 3 + k] == normals[6 * 3 + k]);  // side1
+		assert(normals[7 * 3 + k] == normals[9 * 3 + k]);  // side2
+		assert(normals[5 * 3 + k] == normals[8 * 3 + k]);  // apex
+		assert(normals[5 * 3 + k] == normals[11 * 3 + k]); // apex
+	}
+}
+
+static void normalsDegenerate()
+{
+	const float vertices[][3] = {
+	    {0.f, 0.f, 0.f},
+	    {0.f, 1.f, 0.f},
+	    {1.f, 0.f, 0.f},
+	    {2.f, 0.f, 0.f},
+	    {0.f, 0.5f, 0.f},
+	};
+
+	// degenerate triangle connects the triangles across a hard edge
+	const unsigned int indices[] = {0, 1, 2, 0, 2, 3, 0, 3, 4};
+
+	float normals[9 * 3];
+	meshopt_generateNormals(normals, indices, 9, vertices[0], 5, sizeof(vertices[0]), 3.14159265f * 3.f / 4.f, 0.f);
+
+	const float negative[3] = {0.f, 0.f, -1.f};
+	const float zero[3] = {0.f, 0.f, 0.f};
+	const float positive[3] = {0.f, 0.f, 1.f};
+	const float* expected[9] = {negative, negative, negative, zero, zero, zero, positive, positive, positive};
+
+	for (size_t i = 0; i < 9; ++i)
+		for (size_t k = 0; k < 3; ++k)
+			assert(fabsf(normals[i * 3 + k] - expected[i][k]) < 1e-3f);
+}
+
 void runTests()
 {
 	decodeIndexV0();
@@ -3363,6 +3604,7 @@ void runTests()
 		decodeVertexRejectMalformedHeaders();
 		decodeVertexBitGroups();
 		decodeVertexBitGroupSentinels();
+		decodeVertexBitGroupSentinelCount();
 		decodeVertexDeltas();
 		decodeVertexBitXor();
 		decodeVertexLarge();
@@ -3383,6 +3625,8 @@ void runTests()
 	encodeFilterQuat12();
 	encodeFilterExp();
 	encodeFilterExpZero();
+	encodeFilterExpOverflow();
+	encodeFilterExpZeroShared();
 	encodeFilterExpAlias();
 	encodeFilterExpClamp();
 	encodeFilterColor8();
@@ -3436,6 +3680,7 @@ void runTests()
 	simplifyUpdate();
 	simplifyUpdateLocked(0);
 	simplifyUpdateLocked(meshopt_SimplifySparse);
+	simplifyFolds();
 
 	filterTriangles();
 	adjacency();
@@ -3456,5 +3701,8 @@ void runTests()
 	opacityMapRasterize0();
 	opacityMapSpecial();
 
+	tangentsBasic();
 	tangentDegenerate();
+	normalsBasic();
+	normalsDegenerate();
 }

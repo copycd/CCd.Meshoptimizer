@@ -39,7 +39,7 @@ WASIROOT?=$(WASI_SDK)/share/wasi-sysroot
 
 WASM_FLAGS=--target=wasm32-wasi -Wno-deprecated --sysroot=$(WASIROOT) --no-wasm-opt
 WASM_FLAGS+=-Wall -Wextra
-WASM_FLAGS+=-O3 -DNDEBUG -nostartfiles -nostdlib -Wl,--no-entry -Wl,-s
+WASM_FLAGS+=-O3 -DNDEBUG -DMESHOPTIMIZER_VERTEXCODEC_ZEROCOPY -nostartfiles -nostdlib -Wl,--no-entry -Wl,-s
 WASM_FLAGS+=-mcpu=mvp # make sure clang doesn't use post-MVP features like sign extension
 WASM_FLAGS+=-fno-slp-vectorize -fno-vectorize -fno-unroll-loops
 WASM_FLAGS+=-Wl,-z -Wl,stack-size=36864 -Wl,--initial-memory=65536
@@ -51,14 +51,14 @@ WASM_DECODER_EXPORTS=meshopt_decodeVertexBuffer meshopt_decodeIndexBuffer meshop
 WASM_ENCODER_SOURCES=src/vertexcodec.cpp src/indexcodec.cpp src/vertexfilter.cpp src/vcacheoptimizer.cpp src/vfetchoptimizer.cpp src/spatialorder.cpp tools/wasmstubs.cpp
 WASM_ENCODER_EXPORTS=meshopt_encodeVertexBuffer meshopt_encodeVertexBufferBound meshopt_encodeVertexBufferLevel meshopt_encodeIndexBuffer meshopt_encodeIndexBufferBound meshopt_encodeIndexSequence meshopt_encodeIndexSequenceBound meshopt_encodeVertexVersion meshopt_encodeIndexVersion meshopt_encodeFilterOct meshopt_encodeFilterQuat meshopt_encodeFilterExp meshopt_encodeFilterColor meshopt_optimizeVertexCache meshopt_optimizeVertexCacheStrip meshopt_optimizeVertexFetchRemap meshopt_spatialSortRemap sbrk __wasm_call_ctors
 
-WASM_SIMPLIFIER_SOURCES=src/simplifier.cpp src/vfetchoptimizer.cpp src/indexgenerator.cpp tools/wasmstubs.cpp
-WASM_SIMPLIFIER_EXPORTS=meshopt_simplify meshopt_simplifyWithAttributes meshopt_simplifyWithUpdate meshopt_simplifyScale meshopt_simplifyPoints meshopt_simplifySloppy meshopt_simplifyPrune meshopt_optimizeVertexFetchRemap meshopt_generatePositionRemap sbrk __wasm_call_ctors
+WASM_SIMPLIFIER_SOURCES=src/simplifier.cpp src/remesher.cpp src/vfetchoptimizer.cpp src/indexgenerator.cpp tools/wasmstubs.cpp
+WASM_SIMPLIFIER_EXPORTS=meshopt_simplify meshopt_simplifyWithAttributes meshopt_simplifyWithUpdate meshopt_simplifyScale meshopt_simplifyPoints meshopt_simplifySloppy meshopt_simplifyPrune meshopt_remesh meshopt_optimizeVertexFetchRemap meshopt_generatePositionRemap sbrk __wasm_call_ctors
 
 WASM_CLUSTERIZER_SOURCES=src/clusterizer.cpp src/meshletutils.cpp tools/wasmstubs.cpp
 WASM_CLUSTERIZER_EXPORTS=meshopt_buildMeshletsBound meshopt_buildMeshletsFlex meshopt_buildMeshletsSpatial meshopt_computeClusterBounds meshopt_computeMeshletBounds meshopt_computeSphereBounds meshopt_optimizeMeshlet sbrk __wasm_call_ctors
 
 WASM_TANGENTS_SOURCES=src/tangentspace.cpp tools/wasmstubs.cpp
-WASM_TANGENTS_EXPORTS=meshopt_generateTangents sbrk __wasm_call_ctors
+WASM_TANGENTS_EXPORTS=meshopt_generateTangents meshopt_generateNormals sbrk __wasm_call_ctors
 
 ifneq ($(werror),)
 	CFLAGS+=-Werror
@@ -94,7 +94,7 @@ ifeq ($(config),release-avx)
 endif
 
 ifeq ($(config),release-avx512)
-	CXXFLAGS+=-O3 -DNDEBUG -mavx512vl -mavx512vbmi -mavx512vbmi2
+	CXXFLAGS+=-O3 -DNDEBUG -mavx512vl -mavx512vbmi -mavx512vbmi2 -mbmi2
 endif
 
 ifeq ($(config),release-scalar)

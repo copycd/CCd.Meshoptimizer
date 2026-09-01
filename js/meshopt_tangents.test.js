@@ -7,6 +7,33 @@ process.on('unhandledRejection', (error) => {
 });
 
 var tests = {
+	tangentsBasic: function () {
+		// unindexed quad with matching corner data for shared diagonal
+		var positions = new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0]);
+		var normals = new Float32Array([-0.28, 0, 0.96, 0.28, 0, 0.96, 0.28, 0, 0.96, -0.28, 0, 0.96, 0.28, 0, 0.96, -0.28, 0, 0.96]);
+		var uvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]);
+
+		// (1, 0, 0) reprojected onto tilted normals
+		var left = [0.96, 0, 0.28, 1];
+		var right = [0.96, 0, -0.28, 1];
+		var expected = [left, right, right, left, right, left].flat();
+
+		// unindexed input: indices = null
+		var result = tangents.generateTangents(null, positions, 3, normals, 3, uvs, 2, []);
+
+		assert.equal(result.length, expected.length);
+
+		for (var i = 0; i < result.length; ++i) {
+			assert(Math.abs(result[i] - expected[i]) < 1e-3);
+		}
+
+		// shared vertices get the same tangent vector
+		for (var k = 0; k < 4; ++k) {
+			assert(result[0 * 4 + k] === result[3 * 4 + k]); // diag 1
+			assert(result[2 * 4 + k] === result[4 * 4 + k]); // diag 2
+		}
+	},
+
 	tangentDegenerate: function () {
 		var positions = new Float32Array([0, 0, 0, 1, 1, 0, 2, 2, 0, -1, -2, 1, 0, 1, 1, -1, 0, 0]);
 		var normals = new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]);
@@ -50,6 +77,37 @@ var tests = {
 
 		for (var i = 0; i < result.length; ++i) {
 			assert(Math.abs(result[i] - expected[i]) < 1e-3);
+		}
+	},
+
+	normalsBasic: function () {
+		var positions = new Float32Array([-1, -0.57735, 0, 1, -0.57735, 0, 0, 1.1547, 0, 0, 0, 0.38]);
+
+		// flattened tetrahedron (apex is closer to the base so that we can get soft side edges)
+		var indices = new Uint32Array([0, 2, 1, 0, 1, 3, 1, 2, 3, 2, 0, 3]);
+
+		var base = [0, 0, -1];
+		var side0 = [-0.2707, -0.1563, 0.9499];
+		var side1 = [0.2707, -0.1563, 0.9499];
+		var side2 = [0, 0.3126, 0.9499];
+		var apex = [0, 0, 1];
+		var expected = [base, base, base, side0, side1, apex, side1, side2, apex, side2, side0, apex].flat();
+
+		var result = tangents.generateNormals(indices, positions, 3, Math.PI / 3);
+
+		assert.equal(result.length, expected.length);
+
+		for (var i = 0; i < result.length; ++i) {
+			assert(Math.abs(result[i] - expected[i]) < 1e-3);
+		}
+
+		// shared vertices around soft side edges get the same normal vector
+		for (var k = 0; k < 3; ++k) {
+			assert(result[3 * 3 + k] === result[10 * 3 + k]); // side0
+			assert(result[4 * 3 + k] === result[6 * 3 + k]); // side1
+			assert(result[7 * 3 + k] === result[9 * 3 + k]); // side2
+			assert(result[5 * 3 + k] === result[8 * 3 + k]); // apex
+			assert(result[5 * 3 + k] === result[11 * 3 + k]); // apex
 		}
 	},
 };

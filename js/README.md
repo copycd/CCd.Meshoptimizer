@@ -172,6 +172,22 @@ This function takes an additional `vertex_attributes` buffer that contains all t
 
 The optional `vertex_lock` parameter can be used to lock some vertices in place, preventing them from being moved during simplification. This is a binary array of the same length as the number of vertices, where `1` means that the vertex is locked and `0` means that it is free to move. This can be used to preserve seams or other important features of the mesh.
 
+All simplification functions described so far reuse the original vertex buffer and only produce a new index buffer; however, for more aggressive simplification to retain visual quality, it may be necessary to adjust vertex data for optimal appearance. This can be done by using a variant of the simplification function that updates vertex positions and attributes, `simplifyWithUpdate`:
+
+```ts
+simplifyWithUpdate: (indices: Uint32Array, vertex_positions: Float32Array, vertex_positions_stride: number, vertex_attributes: Float32Array, vertex_attributes_stride: number, attribute_weights: number[], vertex_lock: Uint8Array | null, target_index_count: number, target_error: number, flags?: SimplifierFlags[]) => [number, number];
+```
+
+Unlike `simplify`/`simplifyWithAttributes`, this function updates the index buffer as well as vertex positions and attributes in place, and returns the resulting index count (which the `indices` array should be truncated to) and appearance error. The resulting indices still refer to the original vertex buffer; any attributes that are not passed to the simplifier can be left unchanged. However, since the original vertex data is no longer valid for rendering the original mesh, a new compact vertex buffer should be generated using `compactMesh`. If the original data was important, it should be copied before calling this function.
+
+The library also provides another simplification algorithm, `simplifySloppy`, which doesn't follow the topology of the original mesh:
+
+```ts
+simplifySloppy: (indices: Uint32Array, vertex_positions: Float32Array, vertex_positions_stride: number, vertex_lock: Uint8Array | null, target_index_count: number, target_error: number) => [Uint32Array, number];
+```
+
+This means that it doesn't preserve attribute seams or borders, but it can collapse internal details that are too small to matter because it can merge mesh features that are topologically disjoint but spatially close. In general, this algorithm produces meshes with worse geometric quality and poor attribute quality compared to `simplify`, but may simplify further. The optional `vertex_lock` array can be used to lock some vertices in place, with `1` marking locked vertices, or can be `null`.
+
 When the resulting mesh is stored, it might be desirable to remove the redundant vertices from the attribute buffers instead of simply using the original vertex data with the smaller index buffer. For that purpose, the simplifier module provides the `compactMesh` function, which is similar to `reorderMesh` function that the encoder provides, but doesn't perform extra optimizations and merely prepares a new vertex order that can be used to create new, smaller, vertex buffers:
 
 ```ts
@@ -280,7 +296,17 @@ For each triangle *corner* this writes a normalized tangent vector (xyz) and an 
 
 Because tangents are computed per corner, applying them to mesh vertices requires de-indexing the mesh and generating a new index/vertex buffer afterwards, or using indexed data and copying tangents to existing vertex data while duplicating vertices with different tangents. With the indexed input, if it contains UV mirroring, vertices along the mirror edge may have different tangent spaces on different sides of the edge and need to be split - copying tangents to existing vertex data without splitting will not produce correct results.
 
-The algorithm uses a MikkTSpace-like construction but by default, uses a modified weighting scheme that significantly improves tangent quality around beveled regions in the mesh. If the normal maps are baked from higher resolution geometry using MikkTSpace weighting, it's possible to produce MikkTSpace-compatible tangents by passing `'Compatible'` option in `flags`
+The algorithm uses a MikkTSpace-like construction but by default, uses a modified weighting scheme that significantly improves tangent quality around beveled regions in the mesh. If the normal maps are baked from higher resolution geometry using MikkTSpace weighting, it's possible to produce MikkTSpace-compatible tangents by passing `'Compatible'` option in `flags`.
+
+Additionally, this module provides a function to generate vertex normals from positions alone:
+
+```ts
+generateNormals: (indices: Uint32Array | null, vertex_positions: Float32Array, vertex_positions_stride: number, crease_angle: number, smoothing?: number) => Float32Array;
+```
+
+This function classifies edges as soft/hard based on the specified crease angle (in radians; 30/45/60 degrees are commonly used values) and computes a normal for every corner by averaging normals of incident faces connected by soft edges. Additionally, the `smoothing` parameter can be used to perform additional iterative smoothing of the resulting normals, with larger values resulting in smoother normals (recommended range `[0..5]`).
+
+Similarly to `generateTangents`, the function returns an array of per-corner normals (3 floats for each of 3 corners of each triangle). Applying them to mesh vertices requires de-indexing the mesh, or copying normals to existing vertices while duplicating vertices with different normals.
 
 ## License
 
