@@ -2,13 +2,14 @@
   혹은  프로젝트 위치로 이동 
   cd /mnt/d/GitHub/CCd.Meshoptimizer
   
-- 아래 명령 수행.  
+- 아래 명령 으로 makefile 생성. 
+- 주의: CCd.basis_universal 경로 맞는지 확인.
 cmake -B build_linux \
     -DCMAKE_BUILD_TYPE=Release \
     -DMESHOPT_BUILD_CCd_LINUX=ON \
     -DMESHOPT_GLTFPACK_BASISU_PATH=/mnt/d/GitHub/CCd.basis_universal \
     -DMESHOPT_INSTALL=OFF
-
+- 빌드
 cmake --build build_linux --parallel
 
 // 산출물은 build_linux/libHeliosenGltfpack.so 하나뿐이다.
@@ -25,6 +26,7 @@ ls build_linux/*.so
 // -> libHeliosenGltfpack.so 만 나와야 정상. 다른 게 보이면 지운다.
 rm -f build_linux/libCCdMeshOptimizer.so build_linux/libWRONG.so test/test_wrong
 
+// 테스트용 프로그램빌드.
 gcc test/test_so.c \
     -L./build_linux \
     -lHeliosenGltfpack \
