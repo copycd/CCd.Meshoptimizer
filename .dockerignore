@@ -1,0 +1,11 @@
+# 빌드 산출물 — 컨텍스트에 넣을 이유가 없다
+.git/
+.github/
+.vs/
+build/
+build_linux/
+bin/
+dist/
+
+# 문서/기타
+*.hwp

@@ -101,7 +101,49 @@ rm -f libWRONG.so link_wrong.sh test_wrong
 cd ..
 
 
-[Docker 만들기]
-컴파일 성공하면
-docker build -t ccd-meshoptimizer .
-만일 docker가 없다고 에러나면, windows host에서 docker를 실행했는지 확인.
+[Docker 이미지 만들기]
+// 컨텍스트는 이 저장소 하나. basis_universal 은 별도 컨텍스트로 넘긴다.
+// (예전 Dockerfile 처럼 부모 폴더를 컨텍스트로 쓰면 D:\GitHub 전체가 딸려간다)
+cd /mnt/d/GitHub/CCd.Meshoptimizer
+docker build -t heliosen-gltfpack --build-context basisu=../CCd.basis_universal .
+
+// 빌드 마지막 단계에서 컨테이너 안의 HeliosenGltfpack --selftest 를 돌린다.
+// 이름 잠금이 깨졌거나 .so 를 못 물면 거기서 빌드가 실패하므로 조기에 잡힌다.
+// docker 가 없다고 나오면 windows host 에서 docker desktop 을 켰는지 확인.
+
+
+[Docker 운영 - 상주 컨테이너 + exec]
+// 중요. 매 호출마다 docker run 을 쓰면 안 된다. 컨테이너 생성 부하가 계산시간보다 비싸다.
+//
+// 실측 (tree.glb 281KB, 중앙값)
+//   컨테이너 내부 순수 계산        277 ms    <- 네이티브 277ms 와 동일. 계산 저하 없음.
+//   docker exec 로 호출            +약 17 ms
+//   docker run --rm 로 매번 호출   +약 400 ms   (컨테이너 생성 + 파괴)
+//
+// 그래서 컨테이너는 한 번만 띄우고 exec 로 때린다.
+docker run -d --name heliosen-gltfpack --restart unless-stopped \
+    -v /srv/models:/work heliosen-gltfpack
+
+docker exec heliosen-gltfpack HeliosenGltfpack -i /work/in.glb -o /work/out.glb -c -tc
+
+// 로딩 확인
+docker exec heliosen-gltfpack HeliosenGltfpack --selftest
+
+// 결과물 소유권을 호스트 사용자로 맞추려면 --user 를 준다. (안 주면 root 소유가 된다)
+docker exec --user $(id -u):$(id -g) heliosen-gltfpack \
+    HeliosenGltfpack -i /work/in.glb -o /work/out.glb -c -tc
+
+// 일회성 실행도 되지만 위 400ms 부하가 매번 붙는다.
+docker run --rm -v /srv/models:/work heliosen-gltfpack \
+    HeliosenGltfpack -i /work/in.glb -o /work/out.glb -c -tc
+
+
+[네이티브 설치와 Docker 중 무엇을 쓸까]
+// 짧고 빈번한 호출이면 네이티브 설치가 가장 단순하다. 기동 부하가 1ms 다.
+//   dist/linux-x64 의 두 파일을 그대로 복사하면 끝이다. 위 [배포] 항목 참고.
+// Docker 가 필요하면 상주 컨테이너 + exec 구조로 간다. (+17ms, 사실상 무시 가능)
+//
+// 참고. 빌드 환경으로만 Docker 를 써도 이득이 있다.
+//       WSL(ubuntu 24.04)에서 직접 빌드한 바이너리는 glibc 2.38 / GLIBCXX 3.4.31 을
+//       요구해서 ubuntu 22.04, debian 12 에서 실행되지 않는다.
+//       이 Dockerfile 은 ubuntu 22.04 에서 빌드하므로 그 아래로 호환된다.
