@@ -195,7 +195,7 @@ if(MESHOPT_BUILD_CCd_LINUX AND NOT WIN32)
         OUTPUT_NAME "HeliosenGltfpack"
     )
     target_compile_definitions(CCdMeshOptimizer PRIVATE MYLIBRARY_EXPORTS)
-    target_link_libraries(CCdMeshOptimizer meshoptimizer dl)
+    target_link_libraries(CCdMeshOptimizer PRIVATE meshoptimizer dl)
     target_include_directories(CCdMeshOptimizer PRIVATE src)
 
     if(NOT MESHOPT_GLTFPACK_BASISU_PATH STREQUAL "")
@@ -237,11 +237,37 @@ if(MESHOPT_BUILD_CCd_LINUX AND NOT WIN32)
         endif()
 
         target_compile_definitions(CCdMeshOptimizer PRIVATE WITH_BASISU)
-        target_link_libraries(CCdMeshOptimizer -Wl,--whole-archive basisu_encoder -Wl,--no-whole-archive)
+        target_link_libraries(CCdMeshOptimizer PRIVATE -Wl,--whole-archive basisu_encoder -Wl,--no-whole-archive)
         set_source_files_properties(gltf/encodebasis.cpp PROPERTIES INCLUDE_DIRECTORIES ${BASISU_PATH})
         find_package(Threads REQUIRED)
-        target_link_libraries(CCdMeshOptimizer Threads::Threads)
+        target_link_libraries(CCdMeshOptimizer PRIVATE Threads::Threads)
     endif()
+
+    # copycd:: CLI 런처(HeliosenGltfpack). 실제 구현은 libHeliosenGltfpack.so 안에 있고
+    #          이 실행파일은 CallMain() 으로 넘기기만 하는 껍데기다.
+    #          gltf 소스를 이 실행파일에 정적으로 링크하면 안 된다.
+    #          checkModuleName() 이 dladdr(&gltfMain) 으로 모듈 파일명을 보는데,
+    #          정적 링크하면 그 값이 실행파일 이름이 되어 잠금에 걸린다.
+    #          .so 를 동적 링크해야 dladdr 이 .so 를 가리켜 통과한다.
+    add_executable(HeliosenGltfpackCli CCd.MeshOptimizerLinux/launcher.cpp)
+    set_target_properties(HeliosenGltfpackCli PROPERTIES
+        CXX_STANDARD 20
+        OUTPUT_NAME "HeliosenGltfpack"
+        BUILD_WITH_INSTALL_RPATH TRUE
+        INSTALL_RPATH "$ORIGIN"
+    )
+    target_link_libraries(HeliosenGltfpackCli PRIVATE CCdMeshOptimizer)
+    target_include_directories(HeliosenGltfpackCli PRIVATE CCd.MeshOptimizerLinux)
+
+    # copycd:: 배포 폴더 정리. 빌드가 끝나면 dist/linux-x64 에 실행파일과 .so 를 함께 둔다.
+    #          rpath 가 $ORIGIN 이라 두 파일이 같은 폴더에만 있으면 어디서든 실행된다.
+    set(CCD_DIST_DIR ${CMAKE_SOURCE_DIR}/dist/linux-x64)
+    add_custom_command(TARGET HeliosenGltfpackCli POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CCD_DIST_DIR}
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:CCdMeshOptimizer> ${CCD_DIST_DIR}
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:HeliosenGltfpackCli> ${CCD_DIST_DIR}
+        COMMENT "[dist] HeliosenGltfpack + libHeliosenGltfpack.so -> dist/linux-x64"
+    )
 endif()
 
 if(MESHOPT_INSTALL)

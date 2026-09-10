@@ -2,64 +2,82 @@
   혹은  프로젝트 위치로 이동 
   cd /mnt/d/GitHub/CCd.Meshoptimizer
   
-- 아래 명령 으로 makefile 생성. 
-- 주의: CCd.basis_universal 경로 맞는지 확인.
+- 아래 명령 수행.  
 cmake -B build_linux \
     -DCMAKE_BUILD_TYPE=Release \
     -DMESHOPT_BUILD_CCd_LINUX=ON \
     -DMESHOPT_GLTFPACK_BASISU_PATH=/mnt/d/GitHub/CCd.basis_universal \
     -DMESHOPT_INSTALL=OFF
-- 빌드
+
 cmake --build build_linux --parallel
 
-// 산출물은 build_linux/libHeliosenGltfpack.so 하나뿐이다.
-// CMake 타겟명(CCdMeshOptimizer)과 실제 파일명이 다르다.
-//   CMakeLists.txt 의 OUTPUT_NAME "HeliosenGltfpack" 때문.
-//   => 링크할 때는 -lHeliosenGltfpack.   -lCCdMeshOptimizer 가 아니다.
+// 산출물 2개. 빌드가 끝나면 dist/linux-x64/ 에 자동으로 함께 복사된다.
+//   libHeliosenGltfpack.so   2.4MB   실제 구현 (gltfpack + meshoptimizer + basisu)
+//   HeliosenGltfpack          16KB   CLI 런처. CallMain() 으로 넘기기만 하는 껍데기.
+//
+// CMake 타겟명과 파일명이 다르다.
+//   타겟 CCdMeshOptimizer     -> libHeliosenGltfpack.so   (OUTPUT_NAME)
+//   타겟 HeliosenGltfpackCli  -> HeliosenGltfpack         (OUTPUT_NAME)
+// 손으로 링크할 일이 있으면 -lHeliosenGltfpack 이다. -lCCdMeshOptimizer 가 아니다.
 
 
 [TEST]
-// 주의. 예전 이름(libCCdMeshOptimizer.so)의 잔재가 build_linux 에 남아 있으면
-//       링커가 그걸 잡아서 "옛날 .so 로 테스트 성공" 하는 사고가 난다.
-//       에러가 안 나기 때문에 눈치채기 어렵다. 테스트 전에 반드시 확인할 것.
-ls build_linux/*.so
-// -> libHeliosenGltfpack.so 만 나와야 정상. 다른 게 보이면 지운다.
-rm -f build_linux/libCCdMeshOptimizer.so build_linux/libWRONG.so test/test_wrong
+// gcc 로 테스트 프로그램을 따로 만들 필요 없다. 빌드 산출물로 그냥 돌리면 된다.
+cd dist/linux-x64
 
-// 테스트용 프로그램빌드.
-gcc test/test_so.c \
-    -L./build_linux \
-    -lHeliosenGltfpack \
-    -Wl,-rpath,./build_linux \
-    -o test/test_so
+// 1) 로딩 확인. .so 를 제대로 물었는지 본다.
+./HeliosenGltfpack --selftest
+// -> "Hello(안녕) from native DLL!"  가 나와야 정상.
 
-// 이렇게 실행하면, 압축된 glb가 나와야 성공.
-// rpath 가 상대경로이므로 반드시 프로젝트 루트에서 실행할 것.
-./test/test_so -i ./test/data/tree.glb -o ./test/data/treeout.glb -c -tc
+// 2) 실제 압축.
+./HeliosenGltfpack -i ../../test/data/tree.glb -o /tmp/treeout.glb -c -tc
+// -> tree.glb 281,576 bytes 가 treeout.glb 72,776 bytes 수준으로 줄면 성공.
 
-// 성공 : "Hello(안녕) from native DLL!" 출력 + treeout.glb 생성
-//        (tree.glb 281,576 bytes -> treeout.glb 72,776 bytes 수준)
-// 실패 : "Error: invalid user."  -> 링크된 .so 의 파일명이 틀린 것.
+// 실패 : "Error: invalid user."  -> 물고 있는 .so 의 파일명이 틀린 것.
+//        아래로 확인한다.
+readelf -d ./HeliosenGltfpack | grep -E 'NEEDED|RUNPATH'
+// -> NEEDED  는 libHeliosenGltfpack.so
+//    RUNPATH 는 $ORIGIN  이어야 정상.
 
-// 확인용. 어떤 .so 를 물고 있는지 본다.
-readelf -d test/test_so | grep NEEDED
-// -> libHeliosenGltfpack.so 여야 정상.
+// 참고. HeliosenGltfpack 은 메인이 아니라 16KB 껍데기다.
+//       CCd.MeshOptimizerLinux/launcher.cpp 가 전부이고,
+//       .so 가 export 한 CallMain() -> gltfMain() 으로 넘기기만 한다.
+//       test/test_so.c 는 이걸로 대체되었다. (더 이상 쓰지 않음)
 
-// test_so 는 메인 프로그램이 아니다. 16KB 짜리 껍데기이고,
-// GetTestMessage() / CallMain() 두 개만 불러서 .so 안의 gltfMain() 으로 넘긴다.
-// 실제 알맹이(gltfpack + meshoptimizer + basisu)는 전부 .so 쪽 2.4MB 에 있다.
+
+[배포]
+// dist/linux-x64 폴더를 통째로 복사하면 끝이다. 두 파일이 같은 폴더에만 있으면 된다.
+//   HeliosenGltfpack
+//   libHeliosenGltfpack.so
+//
+// 실행파일 rpath 가 $ORIGIN 이라 설치 경로에 상관없이 옆의 .so 를 찾는다.
+// LD_LIBRARY_PATH 설정이나 ldconfig 등록이 필요 없다.
+//
+// 대상 머신에 아래는 있어야 한다 (ubuntu 22.04 기준 기본 포함).
+//   libzstd.so.1  libstdc++.so.6  libm.so.6  libgcc_s.so.1  libc.so.6
+// 확인 : ldd dist/linux-x64/HeliosenGltfpack
+
+// C# 등에서 라이브러리로 쓸 때는 libHeliosenGltfpack.so 만 가져가서
+// CallMain(int argc, char** argv) 를 P/Invoke 하면 된다. 런처는 필요 없다.
 
 
 [모듈 이름 잠금(License) 검증]
-// gltf/gltfpack.cpp 의 checkModuleName() 이 .so 자기 파일명을 확인한다.
-//   Linux   : libHeliosenGltfpack   (실행파일 이름이 아니라 .so 파일명을 본다)
-//   Windows : heliosen.gltfpack
+// gltf/gltfpack.cpp 의 checkModuleName() 이 모듈 파일명을 확인한다.
+//   Linux   : libHeliosenGltfpack
+//   Windows : heliosen.gltfpack   (소문자화 + 확장자 제거라 dll/exe 공통)
 // 틀리면 "Error: invalid user." 출력 후 exit(1).
 //
-// 주의. cp 로 파일 이름만 바꿔서 링크하면 검증이 안 된다.
-//       .so 안에 SONAME=libHeliosenGltfpack.so 가 박혀 있어서
-//       링커가 파일명이 아니라 SONAME 을 DT_NEEDED 에 기록하고,
-//       실행시엔 결국 정상 .so 를 물어와 그냥 통과해 버린다.
+// 중요. 검사 대상은 실행파일 이름이 아니라 gltfMain() 이 들어있는 모듈의 파일명이다.
+//       dladdr((void*)&gltfMain, ...) 이 돌려주는 값을 본다.
+//       => 런처가 .so 를 동적 링크하면 dladdr 이 .so 를 가리켜 통과한다.
+//          그래서 실행파일 이름은 아무거나 상관없다.
+//       => 반대로 gltf 소스를 실행파일에 정적으로 링크하면 dladdr 이 실행파일 자신을
+//          가리켜서 잠금에 걸린다. MESHOPT_BUILD_GLTFPACK=ON 으로 만드는 upstream
+//          gltfpack 실행파일이 바로 이 경우라 쓸 수 없다.
+//
+// 주의. cp 로 .so 파일 이름만 바꿔 링크하면 검증이 안 된다.
+//       .so 안에 SONAME=libHeliosenGltfpack.so 가 박혀 있어서 링커가 파일명이 아니라
+//       SONAME 을 DT_NEEDED 에 기록하고, 실행시엔 결국 정상 .so 를 물어와 통과해 버린다.
 //       => soname 까지 바꿔서 다시 링크해야 한다.
 
 cd build_linux
@@ -67,19 +85,20 @@ sed -e 's/-Wl,-soname,libHeliosenGltfpack\.so/-Wl,-soname,libWRONG.so/' \
     -e 's/-o libHeliosenGltfpack\.so/-o libWRONG.so/' \
     CMakeFiles/CCdMeshOptimizer.dir/link.txt > link_wrong.sh
 sh link_wrong.sh
-cd ..
-
-gcc test/test_so.c -L./build_linux -lWRONG -Wl,-rpath,./build_linux -o test/test_wrong
-readelf -d test/test_wrong | grep NEEDED
+gcc ../CCd.MeshOptimizerLinux/launcher.cpp -I../CCd.MeshOptimizerLinux \
+    -L. -lWRONG -Wl,-rpath,'$ORIGIN' -o test_wrong
+readelf -d test_wrong | grep NEEDED
 // -> libWRONG.so 여야 한다.
 //    libHeliosenGltfpack.so 로 나오면 위 sed 가 안 먹은 것이라 검증이 무의미하다.
 
-./test/test_wrong -i ./test/data/tree.glb -o ./test/data/wrong.glb -c -tc
+./test_wrong -i ../test/data/tree.glb -o /tmp/wrong.glb -c -tc
 // -> "Error: invalid user." 가 뜨고 exit=1 이어야 정상.
 //    압축이 되면 잠금이 깨진 것이다.
 
-// 검증이 끝나면 잔재를 반드시 지운다. 안 지우면 다음 [TEST] 때 사고 원인이 된다.
-rm -f build_linux/libWRONG.so build_linux/link_wrong.sh test/test_wrong test/data/wrong.glb
+// 검증이 끝나면 잔재를 반드시 지운다.
+// 남겨두면 다음 빌드 때 링커가 엉뚱한 .so 를 집어가는 사고의 원인이 된다.
+rm -f libWRONG.so link_wrong.sh test_wrong
+cd ..
 
 
 [Docker 만들기]

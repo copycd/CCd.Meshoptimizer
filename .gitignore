@@ -22,3 +22,6 @@ compile_commands.json
 
 # 빌드과정에서 생성되는 파일들
 /build_linux/
+
+# 배포 산출물
+dist/
