@@ -196,6 +196,12 @@ if(MESHOPT_BUILD_CCd_LINUX AND NOT WIN32)
     )
     target_compile_definitions(CCdMeshOptimizer PRIVATE MYLIBRARY_EXPORTS)
     target_link_libraries(CCdMeshOptimizer PRIVATE meshoptimizer dl)
+    # copycd:: meshoptimizer 는 정적 라이브러리인데 이것을 공유 라이브러리(.so)에 넣는다.
+    #          그래서 PIC 으로 컴파일돼 있어야 한다. (basisu_encoder 는 아래에서 이미 켜 둠)
+    #          ubuntu 의 gcc 는 기본 설정 덕에 그냥 넘어가지만, RHEL 9(gcc 11)에서는
+    #          "relocation R_X86_64_32S against .rodata ... recompile with -fPIC" 로
+    #          링크가 실패한다. 켜 두면 양쪽 다 문제없다.
+    set_target_properties(meshoptimizer PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_include_directories(CCdMeshOptimizer PRIVATE src)
 
     if(NOT MESHOPT_GLTFPACK_BASISU_PATH STREQUAL "")
