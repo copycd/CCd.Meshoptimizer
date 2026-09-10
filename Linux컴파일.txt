@@ -8,20 +8,76 @@ cmake -B build_linux \
     -DMESHOPT_BUILD_CCd_LINUX=ON \
     -DMESHOPT_GLTFPACK_BASISU_PATH=/mnt/d/GitHub/CCd.basis_universal \
     -DMESHOPT_INSTALL=OFF
-	
+
 cmake --build build_linux --parallel
+
+// 산출물은 build_linux/libHeliosenGltfpack.so 하나뿐이다.
+// CMake 타겟명(CCdMeshOptimizer)과 실제 파일명이 다르다.
+//   CMakeLists.txt 의 OUTPUT_NAME "HeliosenGltfpack" 때문.
+//   => 링크할 때는 -lHeliosenGltfpack.   -lCCdMeshOptimizer 가 아니다.
 
 
 [TEST]
+// 주의. 예전 이름(libCCdMeshOptimizer.so)의 잔재가 build_linux 에 남아 있으면
+//       링커가 그걸 잡아서 "옛날 .so 로 테스트 성공" 하는 사고가 난다.
+//       에러가 안 나기 때문에 눈치채기 어렵다. 테스트 전에 반드시 확인할 것.
+ls build_linux/*.so
+// -> libHeliosenGltfpack.so 만 나와야 정상. 다른 게 보이면 지운다.
+rm -f build_linux/libCCdMeshOptimizer.so build_linux/libWRONG.so test/test_wrong
+
 gcc test/test_so.c \
     -L./build_linux \
-    -lCCdMeshOptimizer \
+    -lHeliosenGltfpack \
     -Wl,-rpath,./build_linux \
     -o test/test_so
 
 // 이렇게 실행하면, 압축된 glb가 나와야 성공.
+// rpath 가 상대경로이므로 반드시 프로젝트 루트에서 실행할 것.
 ./test/test_so -i ./test/data/tree.glb -o ./test/data/treeout.glb -c -tc
 
+// 성공 : "Hello(안녕) from native DLL!" 출력 + treeout.glb 생성
+//        (tree.glb 281,576 bytes -> treeout.glb 72,776 bytes 수준)
+// 실패 : "Error: invalid user."  -> 링크된 .so 의 파일명이 틀린 것.
+
+// 확인용. 어떤 .so 를 물고 있는지 본다.
+readelf -d test/test_so | grep NEEDED
+// -> libHeliosenGltfpack.so 여야 정상.
+
+// test_so 는 메인 프로그램이 아니다. 16KB 짜리 껍데기이고,
+// GetTestMessage() / CallMain() 두 개만 불러서 .so 안의 gltfMain() 으로 넘긴다.
+// 실제 알맹이(gltfpack + meshoptimizer + basisu)는 전부 .so 쪽 2.4MB 에 있다.
+
+
+[모듈 이름 잠금(License) 검증]
+// gltf/gltfpack.cpp 의 checkModuleName() 이 .so 자기 파일명을 확인한다.
+//   Linux   : libHeliosenGltfpack   (실행파일 이름이 아니라 .so 파일명을 본다)
+//   Windows : heliosen.gltfpack
+// 틀리면 "Error: invalid user." 출력 후 exit(1).
+//
+// 주의. cp 로 파일 이름만 바꿔서 링크하면 검증이 안 된다.
+//       .so 안에 SONAME=libHeliosenGltfpack.so 가 박혀 있어서
+//       링커가 파일명이 아니라 SONAME 을 DT_NEEDED 에 기록하고,
+//       실행시엔 결국 정상 .so 를 물어와 그냥 통과해 버린다.
+//       => soname 까지 바꿔서 다시 링크해야 한다.
+
+cd build_linux
+sed -e 's/-Wl,-soname,libHeliosenGltfpack\.so/-Wl,-soname,libWRONG.so/' \
+    -e 's/-o libHeliosenGltfpack\.so/-o libWRONG.so/' \
+    CMakeFiles/CCdMeshOptimizer.dir/link.txt > link_wrong.sh
+sh link_wrong.sh
+cd ..
+
+gcc test/test_so.c -L./build_linux -lWRONG -Wl,-rpath,./build_linux -o test/test_wrong
+readelf -d test/test_wrong | grep NEEDED
+// -> libWRONG.so 여야 한다.
+//    libHeliosenGltfpack.so 로 나오면 위 sed 가 안 먹은 것이라 검증이 무의미하다.
+
+./test/test_wrong -i ./test/data/tree.glb -o ./test/data/wrong.glb -c -tc
+// -> "Error: invalid user." 가 뜨고 exit=1 이어야 정상.
+//    압축이 되면 잠금이 깨진 것이다.
+
+// 검증이 끝나면 잔재를 반드시 지운다. 안 지우면 다음 [TEST] 때 사고 원인이 된다.
+rm -f build_linux/libWRONG.so build_linux/link_wrong.sh test/test_wrong test/data/wrong.glb
 
 
 [Docker 만들기]
