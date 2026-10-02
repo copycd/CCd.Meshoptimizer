@@ -12,7 +12,7 @@ if(POLICY CMP0092)
     cmake_policy(SET CMP0092 NEW) # Enables clean /W4 override for MSVC
 endif()
 
-project(meshoptimizer VERSION 1.2 LANGUAGES CXX)
+project(meshoptimizer VERSION 1.3 LANGUAGES CXX)
 
 option(MESHOPT_BUILD_DEMO "Build demo" OFF)
 option(MESHOPT_BUILD_GLTFPACK "Build gltfpack" OFF)
@@ -118,7 +118,7 @@ if(MESHOPT_BUILD_SHARED_LIBS)
 endif()
 
 if(MESHOPT_BUILD_DEMO)
-    add_executable(demo demo/main.cpp demo/nanite.cpp demo/tests.cpp tools/objloader.cpp)
+    add_executable(demo demo/main.cpp demo/nanite.cpp demo/tests.cpp)
     set_target_properties(demo PROPERTIES CXX_STANDARD 11)
     set_target_properties(demo PROPERTIES OUTPUT_NAME meshoptdemo)
     target_link_libraries(demo meshoptimizer)
@@ -181,6 +181,7 @@ if(MESHOPT_BUILD_GLTFPACK)
     endif()
 endif()
 
+# copycd:: for linux
 option(MESHOPT_BUILD_CCd_LINUX "Build CCd Linux shared library (CCdMeshOptimizer.so)" OFF)
 
 if(MESHOPT_BUILD_CCd_LINUX AND NOT WIN32)
