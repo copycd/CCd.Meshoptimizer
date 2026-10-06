@@ -20,12 +20,8 @@ LIBRARY=$(BUILD)/libmeshoptimizer.a
 DEMO=$(BUILD)/meshoptdemo
 
 CFLAGS=-g -Wall -Wextra -std=c89
-CXXFLAGS=-g -Wall -Wextra -Wshadow -Wno-missing-field-initializers
+CXXFLAGS=-g -Wall -Wextra -Wshadow -Wno-missing-field-initializers -std=c++11
 LDFLAGS=
-
-$(LIBRARY_OBJECTS): CXXFLAGS+=-std=gnu++98
-$(DEMO_OBJECTS): CXXFLAGS+=-std=c++11
-$(GLTFPACK_OBJECTS): CXXFLAGS+=-std=c++11
 
 ifdef BASISU
     $(GLTFPACK_OBJECTS): CXXFLAGS+=-DWITH_BASISU
@@ -63,13 +59,6 @@ WASM_TANGENTS_EXPORTS=meshopt_generateTangents meshopt_generateNormals sbrk __wa
 ifneq ($(werror),)
 	CFLAGS+=-Werror
 	CXXFLAGS+=-Werror
-endif
-
-ifeq ($(config),iphone)
-	IPHONESDK=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk
-	CFLAGS+=-arch armv7 -arch arm64 -isysroot $(IPHONESDK)
-	CXXFLAGS+=-arch armv7 -arch arm64 -isysroot $(IPHONESDK) -stdlib=libc++
-	LDFLAGS+=-arch armv7 -arch arm64 -isysroot $(IPHONESDK) -L $(IPHONESDK)/usr/lib -mios-version-min=7.0
 endif
 
 ifeq ($(config),trace)
@@ -219,7 +208,7 @@ $(DEMO): $(DEMO_OBJECTS) $(LIBRARY)
 	$(CXX) $^ $(LDFLAGS) -o $@
 
 vcachetuner: tools/vcachetuner.cpp $(LIBRARY)
-	$(CXX) $^ -fopenmp $(CXXFLAGS) -std=c++11 $(LDFLAGS) -o $@
+	$(CXX) $^ -fopenmp $(CXXFLAGS) $(LDFLAGS) -o $@
 
 codecbench: tools/codecbench.cpp $(LIBRARY)
 	$(CXX) $^ $(CXXFLAGS) $(LDFLAGS) -o $@
