@@ -527,13 +527,52 @@ static size_t process(cgltf_data* data, const char* input_path, const char* outp
 	size_t texture_offset = 0;
 	size_t material_offset = 0;
 
+	// copycd:: KTX2 images carry their own mip chain, but Cesium only samples it when minFilter is a mipmap filter
+	//          (undefined minFilter is treated as LINEAR there), so non-mipmap filters of samplers used by KTX2 textures are
+	//          promoted to LINEAR_MIPMAP_LINEAR. textures without a sampler get an extra one appended after the input samplers.
+	std::vector<bool> sampler_mips(data->samplers_count);
+	std::vector<bool> texture_mips(data->textures_count);
+	bool extra_mips_sampler = false;
+
+	for (size_t i = 0; i < data->textures_count; ++i)
+	{
+		const cgltf_texture& texture = data->textures[i];
+
+		if (!textures[i].keep || !texture.image)
+			continue;
+
+		TextureMode mode = settings.texture_mode[images[texture.image - data->images].kind];
+
+		if (mode != TextureMode_ETC1S && mode != TextureMode_UASTC)
+			continue;
+
+		texture_mips[i] = true;
+
+		if (texture.sampler)
+			sampler_mips[texture.sampler - data->samplers] = true;
+		else
+			extra_mips_sampler = true;
+	}
+
 	for (size_t i = 0; i < data->samplers_count; ++i)
 	{
-		const cgltf_sampler& sampler = data->samplers[i];
+		cgltf_sampler sampler = data->samplers[i];
+
+		// undefined, NEAREST and LINEAR are all below the mipmap filter range
+		if (sampler_mips[i] && sampler.min_filter < cgltf_filter_type_nearest_mipmap_nearest)
+			sampler.min_filter = cgltf_filter_type_linear_mipmap_linear;
 
 		comma(json_samplers);
 		append(json_samplers, "{");
 		writeSampler(json_samplers, sampler);
+		append(json_samplers, "}");
+	}
+
+	if (extra_mips_sampler)
+	{
+		comma(json_samplers);
+		append(json_samplers, "{\"minFilter\":");
+		append(json_samplers, size_t(cgltf_filter_type_linear_mipmap_linear));
 		append(json_samplers, "}");
 	}
 
@@ -573,6 +612,14 @@ static size_t process(cgltf_data* data, const char* input_path, const char* outp
 
 		comma(json_textures);
 		append(json_textures, "{");
+
+		// copycd:: points at the extra sampler added above
+		if (texture_mips[i] && !texture.sampler)
+		{
+			append(json_textures, "\"sampler\":");
+			append(json_textures, data->samplers_count);
+		}
+
 		writeTexture(json_textures, texture, texture.image ? &images[texture.image - data->images] : NULL, data, settings);
 		append(json_textures, "}");
 
