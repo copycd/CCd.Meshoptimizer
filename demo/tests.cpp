@@ -1761,6 +1761,29 @@ static void customAllocator()
 	allocCount = freeCount = 0;
 }
 
+static void customAllocatorCache()
+{
+	meshopt_setAllocator(customAlloc, customFree);
+
+	// cache memory is allocated using the callbacks
+	meshopt_setAllocatorCache(2, 48);
+	assert(allocCount == 1 && freeCount == 0);
+
+	float vb[] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+	unsigned int ib[] = {0, 1, 2};
+
+	// in-place vertex copy (36 bytes) fits into the block, remap table (12 bytes) doesn't fit after it
+	meshopt_optimizeVertexFetch(vb, ib, 3, vb, 3, 12);
+	assert(allocCount == 2 && freeCount == 1);
+
+	meshopt_setAllocatorCache(0, 0);
+	assert(allocCount == 2 && freeCount == 2);
+
+	meshopt_setAllocator(operator new, operator delete);
+
+	allocCount = freeCount = 0;
+}
+
 static void emptyMesh()
 {
 	meshopt_optimizeVertexCache(NULL, NULL, 0, 0);
@@ -3547,16 +3570,15 @@ static void normalsDegenerate()
 	    {0.f, 0.5f, 0.f},
 	};
 
-	// degenerate triangle connects the triangles across a hard edge
+	// degenerate triangle connects the triangles across a hard edge; corners inherit normals from adjacent triangles
 	const unsigned int indices[] = {0, 1, 2, 0, 2, 3, 0, 3, 4};
 
 	float normals[9 * 3];
 	meshopt_generateNormals(normals, indices, 9, vertices[0], 5, sizeof(vertices[0]), 3.14159265f * 3.f / 4.f, 0.f);
 
 	const float negative[3] = {0.f, 0.f, -1.f};
-	const float zero[3] = {0.f, 0.f, 0.f};
 	const float positive[3] = {0.f, 0.f, 1.f};
-	const float* expected[9] = {negative, negative, negative, zero, zero, zero, positive, positive, positive};
+	const float* expected[9] = {negative, negative, negative, negative, negative, positive, positive, positive, positive};
 
 	for (size_t i = 0; i < 9; ++i)
 		for (size_t k = 0; k < 3; ++k)
@@ -3652,6 +3674,7 @@ void runTests()
 	remapCustom();
 
 	customAllocator();
+	customAllocatorCache();
 
 	emptyMesh();
 

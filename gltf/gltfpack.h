@@ -36,6 +36,7 @@ struct Stream
 	cgltf_attribute_type type;
 	int index;
 	int target; // 0 = base mesh, 1+ = morph target
+	int splats; // 1+ = splat attribute type
 
 	const char* custom_name; // only valid for cgltf_attribute_type_custom
 
@@ -60,6 +61,7 @@ struct Mesh
 	cgltf_extras extras;
 
 	cgltf_primitive_type type;
+	bool splats;
 
 	std::vector<Stream> streams;
 	std::vector<unsigned int> indices;
@@ -174,6 +176,8 @@ struct Settings
 	int texture_quality[TextureKind__Count];
 
 	int texture_jobs;
+
+	int splats_dim;
 
 	bool quantize;
 
@@ -292,6 +296,7 @@ struct BufferView
 		Kind_Keyframe,
 		Kind_Instance,
 		Kind_Image,
+		Kind_Splat,
 		Kind_Count
 	};
 
@@ -329,6 +334,7 @@ void removeFile(const char* path);
 
 cgltf_data* parseObj(const char* path, std::vector<Mesh>& meshes, const char** error);
 cgltf_data* parseGltf(const char* path, std::vector<Mesh>& meshes, std::vector<Animation>& animations, const char** error);
+cgltf_data* parseSplats(const char* path, std::vector<Mesh>& meshes, const char** error);
 
 cgltf_data* parseGlb(const void* buffer, size_t size, std::vector<Mesh>& meshes, std::vector<Animation>& animations, const char** error);
 
@@ -336,6 +342,7 @@ bool areExtrasEqual(const cgltf_extras& lhs, const cgltf_extras& rhs);
 
 void processAnimation(Animation& animation, const Settings& settings);
 void processMesh(Mesh& mesh, const Settings& settings);
+void processSplatMesh(Mesh& mesh, const Settings& settings);
 
 bool compareMeshTargets(const Mesh& lhs, const Mesh& rhs);
 bool compareMeshVariants(const Mesh& lhs, const Mesh& rhs);
@@ -393,6 +400,7 @@ StreamFormat writeVertexStream(std::string& bin, const Stream& stream, const Qua
 StreamFormat writeIndexStream(std::string& bin, const std::vector<unsigned int>& stream);
 StreamFormat writeTimeStream(std::string& bin, const std::vector<float>& data);
 StreamFormat writeKeyframeStream(std::string& bin, cgltf_animation_path_type type, const std::vector<Attr>& data, const Settings& settings, bool has_tangents = false);
+StreamFormat writeSplatStream(std::string& bin, const Stream& stream, const Settings& settings);
 
 void compressVertexStream(std::string& bin, const std::string& data, size_t count, size_t stride, int level);
 void compressIndexStream(std::string& bin, const std::string& data, size_t count, size_t stride);
@@ -410,6 +418,7 @@ void appendJson(std::string& s, const char* data);
 
 const char* attributeType(cgltf_attribute_type type);
 const char* animationPath(cgltf_animation_path_type type);
+const char* splatAttributeType(int type);
 
 void writeMaterial(std::string& json, const cgltf_data* data, const cgltf_material& material, const QuantizationPosition* qp, const QuantizationTexture* qt, std::vector<TextureInfo>& textures);
 void writeBufferView(std::string& json, BufferView::Kind kind, StreamFormat::Filter filter, size_t count, size_t stride, size_t bin_offset, size_t bin_size, BufferView::Compression compression, size_t compressed_offset, size_t compressed_size, const char* meshopt_ext);
@@ -419,6 +428,7 @@ void writeTexture(std::string& json, const cgltf_texture& texture, const ImageIn
 void writeMeshAttributes(std::string& json, std::vector<BufferView>& views, std::string& json_accessors, size_t& accr_offset, const Mesh& mesh, int target, const QuantizationPosition& qp, const QuantizationTexture& qt, const Settings& settings);
 size_t writeMeshIndices(std::vector<BufferView>& views, std::string& json_accessors, size_t& accr_offset, const std::vector<unsigned int>& indices, cgltf_primitive_type type, const Settings& settings);
 void writeMeshGeometry(std::string& json, std::vector<BufferView>& views, std::string& json_accessors, size_t& accr_offset, const Mesh& mesh, const QuantizationPosition& qp, const QuantizationTexture& qt, const Settings& settings);
+void writeMeshSplats(std::string& json, std::vector<BufferView>& views, std::string& json_accessors, size_t& accr_offset, const Mesh& mesh, const QuantizationPosition& qp, const Settings& settings);
 size_t writeJointBindMatrices(std::vector<BufferView>& views, std::string& json_accessors, size_t& accr_offset, const cgltf_skin& skin, const QuantizationPosition& qp, const Settings& settings);
 size_t writeInstances(std::vector<BufferView>& views, std::string& json_accessors, size_t& accr_offset, const std::vector<Instance>& instances, const QuantizationPosition& qp, bool has_color, const Settings& settings);
 void writeMeshNode(std::string& json, size_t mesh_offset, cgltf_node* node, cgltf_skin* skin, cgltf_data* data, const QuantizationPosition* qp);
